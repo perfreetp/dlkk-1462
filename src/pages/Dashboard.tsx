@@ -31,7 +31,7 @@ import {
 } from "@/utils";
 import type { FlowNodeType, FlowNode } from "@/types";
 
-const nodeOrder: FlowNodeType[] = ["check_in", "blood_draw", "injection", "rest", "scan", "discharge"];
+const nodeOrder: FlowNodeType[] = ["check_in", "blood_draw", "injection", "rest", "scan", "rescan", "discharge"];
 
 export default function Dashboard() {
   const {
@@ -42,7 +42,8 @@ export default function Dashboard() {
     getPatientById,
     getFlowNodesByAppointment,
     getAppointmentById,
-    updateFlowNodeStatus,
+    advanceFlow,
+    skipFlowNode,
   } = useAppStore();
 
   const todaysAppointments = useMemo(() => {
@@ -98,15 +99,28 @@ export default function Dashboard() {
     return list;
   }, [todaysAppointments, getPatientById, getFlowNodesByAppointment]);
 
-  const handleAdvanceNode = (appointmentId: string, nodes: FlowNode[]) => {
-    const nextNode = nodes.find((n) => n.status === "pending");
-    const currentNode = nodes.find((n) => n.status === "in_progress");
-    if (currentNode) {
-      updateFlowNodeStatus(currentNode.id, "completed", currentNode.startTime, new Date().toISOString());
+  const handleAdvance = (appointmentId: string, skipRescan = true) => {
+    advanceFlow(appointmentId, { skipRescan });
+  };
+
+  const getCurrentNode = (nodes: FlowNode[]): FlowNode | undefined => {
+    return nodes.find((n) => n.status === "in_progress");
+  };
+
+  const getNextNode = (nodes: FlowNode[]): FlowNode | undefined => {
+    const currentIdx = nodes.findIndex((n) => n.status === "in_progress");
+    if (currentIdx !== -1) {
+      for (let i = currentIdx + 1; i < nodeOrder.length; i++) {
+        const n = nodes.find((x) => x.nodeType === nodeOrder[i]);
+        if (n && n.status === "pending") return n;
+      }
+    } else {
+      for (let i = 0; i < nodeOrder.length; i++) {
+        const n = nodes.find((x) => x.nodeType === nodeOrder[i]);
+        if (n && n.status === "pending") return n;
+      }
     }
-    if (nextNode) {
-      updateFlowNodeStatus(nextNode.id, "in_progress", new Date().toISOString());
-    }
+    return undefined;
   };
 
   return (
@@ -179,28 +193,22 @@ export default function Dashboard() {
           <div className="card overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-medical-600" />
-                  <h3 className="text-sm font-semibold text-slate-900">检查流程追踪</h3>
-                </div>
-                <div className="flex items-center gap-3 text-xs">
-                  {nodeOrder.slice(0, 4).map((n) => (
-                    <div key={n} className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-slate-200" />
-                      <span className="text-slate-500">{flowNodeLabel[n]}</span>
-                    </div>
-                  ))}
-                  <ChevronRight className="w-3 h-3 text-slate-300" />
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-slate-200" />
-                    <span className="text-slate-500">入机</span>
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-medical-600" />
+                    <h3 className="text-sm font-semibold text-slate-900">检查流程追踪</h3>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-slate-200" />
-                    <span className="text-slate-500">离院</span>
+                  <div className="flex items-center gap-2 text-xs">
+                    {nodeOrder.map((n, i) => (
+                      <div key={n} className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-slate-200" />
+                        <span className="text-slate-500">{flowNodeLabel[n]}</span>
+                        {i < nodeOrder.length - 1 && (
+                          <ChevronRight className="w-3 h-3 text-slate-300 ml-1" />
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
             </div>
             <div className="max-h-[520px] overflow-y-auto scrollbar-thin">
               <div className="divide-y divide-slate-100">
@@ -272,13 +280,35 @@ export default function Dashboard() {
                           </span>
                         </div>
                         {a.status !== "completed" && (
-                          <button
-                            onClick={() => handleAdvanceNode(a.id, nodes)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity btn-primary text-xs py-1 px-2.5 shrink-0"
-                          >
-                            <Play className="w-3 h-3" />
-                            推进
-                          </button>
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                            {getNextNode(nodes)?.nodeType === "rescan" ? (
+                              <>
+                                <button
+                                  onClick={() => handleAdvance(a.id, true)}
+                                  className="btn-secondary text-xs py-1 px-2"
+                                  title="跳过补扫"
+                                >
+                                  跳过补扫
+                                </button>
+                                <button
+                                  onClick={() => handleAdvance(a.id, false)}
+                                  className="btn-primary text-xs py-1 px-2"
+                                  title="进入补扫"
+                                >
+                                  <Play className="w-3 h-3" />
+                                  补扫
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handleAdvance(a.id)}
+                                className="btn-primary text-xs py-1 px-2.5"
+                              >
+                                <Play className="w-3 h-3" />
+                                推进
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

@@ -60,6 +60,13 @@ export default function Appointment() {
     examSubtype: examTypes[0].subtypes[0],
     timeSlot: timeSlots[0],
     tags: [] as PatientTag[],
+    fastingHours: 0,
+    bloodGlucose: 0,
+    isPregnant: false,
+    isLactating: false,
+    recentContrastExam: "无",
+    allergies: "无",
+    checklistNotes: "",
   });
 
   const filteredAppointments = useMemo(() => {
@@ -100,6 +107,28 @@ export default function Appointment() {
   const handleNewSubmit = () => {
     const patientId = `p_new_${Date.now()}`;
     const appointmentId = `a_new_${Date.now()}`;
+
+    const hasChecklist =
+      newForm.fastingHours > 0 ||
+      newForm.bloodGlucose > 0 ||
+      newForm.isPregnant ||
+      newForm.isLactating ||
+      newForm.recentContrastExam !== "无" ||
+      newForm.allergies !== "无" ||
+      newForm.checklistNotes !== "";
+
+    const checklistData = hasChecklist
+      ? {
+          fastingHours: newForm.fastingHours,
+          bloodGlucose: newForm.bloodGlucose,
+          isPregnant: newForm.isPregnant,
+          isLactating: newForm.isLactating,
+          recentContrastExam: newForm.recentContrastExam,
+          allergies: newForm.allergies,
+          notes: newForm.checklistNotes,
+        }
+      : undefined;
+
     addAppointment(
       {
         id: appointmentId,
@@ -123,7 +152,8 @@ export default function Appointment() {
         phone: newForm.phone,
         department: newForm.department,
         doctor: newForm.doctor,
-      }
+      },
+      checklistData
     );
     setShowNewModal(false);
     setNewForm({
@@ -139,6 +169,13 @@ export default function Appointment() {
       examSubtype: examTypes[0].subtypes[0],
       timeSlot: timeSlots[0],
       tags: [],
+      fastingHours: 0,
+      bloodGlucose: 0,
+      isPregnant: false,
+      isLactating: false,
+      recentContrastExam: "无",
+      allergies: "无",
+      checklistNotes: "",
     });
   };
 
@@ -470,6 +507,109 @@ export default function Appointment() {
                         );
                       })}
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="divider" />
+
+              <div>
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                  前置核查信息（选填，到检时可补充）
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="label flex items-center justify-between">
+                      <span>禁食时长（小时）</span>
+                      <span className="text-xs text-slate-400">要求 ≥ 4h</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={newForm.fastingHours || ""}
+                      onChange={(e) => setNewForm({ ...newForm, fastingHours: Number(e.target.value) })}
+                      className="input"
+                      placeholder="如：6"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="label flex items-center justify-between">
+                      <span>血糖值（mmol/L）</span>
+                      <span className="text-xs text-slate-400">建议 ≤ 11</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={newForm.bloodGlucose || ""}
+                      onChange={(e) => setNewForm({ ...newForm, bloodGlucose: Number(e.target.value) })}
+                      className="input"
+                      placeholder="如：5.6"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">是否妊娠</div>
+                      <div className="text-xs text-slate-500">PET-CT 辐射对胎儿有影响</div>
+                    </div>
+                    <button
+                      onClick={() => setNewForm({ ...newForm, isPregnant: !newForm.isPregnant })}
+                      className={cn(
+                        "w-11 h-6 rounded-full transition-colors relative",
+                        newForm.isPregnant ? "bg-rose-500" : "bg-slate-300"
+                      )}
+                    >
+                      <span className={cn(
+                        "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
+                        newForm.isPregnant ? "left-[22px]" : "left-0.5"
+                      )} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">是否哺乳期</div>
+                      <div className="text-xs text-slate-500">需停止哺乳 24h 以上</div>
+                    </div>
+                    <button
+                      onClick={() => setNewForm({ ...newForm, isLactating: !newForm.isLactating })}
+                      className={cn(
+                        "w-11 h-6 rounded-full transition-colors relative",
+                        newForm.isLactating ? "bg-amber-500" : "bg-slate-300"
+                      )}
+                    >
+                      <span className={cn(
+                        "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
+                        newForm.isLactating ? "left-[22px]" : "left-0.5"
+                      )} />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="label">近期增强检查史</label>
+                    <input
+                      value={newForm.recentContrastExam}
+                      onChange={(e) => setNewForm({ ...newForm, recentContrastExam: e.target.value })}
+                      className="input"
+                      placeholder="如：1周前CT增强，若无请填'无'"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">药物/食物过敏史</label>
+                    <input
+                      value={newForm.allergies}
+                      onChange={(e) => setNewForm({ ...newForm, allergies: e.target.value })}
+                      className="input"
+                      placeholder="如：青霉素过敏，若无请填'无'"
+                    />
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="label">核查备注</label>
+                    <textarea
+                      value={newForm.checklistNotes}
+                      onChange={(e) => setNewForm({ ...newForm, checklistNotes: e.target.value })}
+                      className="input min-h-[60px] resize-none"
+                      placeholder="其他需要特别说明的情况..."
+                    />
                   </div>
                 </div>
               </div>

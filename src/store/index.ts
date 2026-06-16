@@ -12,6 +12,8 @@ import type {
   AppointmentStatus,
   NodeStatus,
   ReportStatus,
+  FlowNodeType,
+  ReportUrgency,
 } from "@/types";
 import { patients as mockPatients } from "@/mock/patients";
 import { appointments as mockAppointments } from "@/mock/appointments";
@@ -24,6 +26,16 @@ import {
   restBeds as mockRestBeds,
   statisticsData as mockStatisticsData,
 } from "@/mock";
+
+const FLOW_NODE_ORDER: FlowNodeType[] = [
+  "check_in",
+  "blood_draw",
+  "injection",
+  "rest",
+  "scan",
+  "rescan",
+  "discharge",
+];
 
 interface AppState {
   patients: Patient[];
@@ -49,12 +61,20 @@ interface AppState {
   updateFlowNodeStatus: (id: string, status: NodeStatus, startTime?: string, endTime?: string) => void;
   updateReportStatus: (id: string, status: ReportStatus) => void;
   addChecklist: (checklist: Checklist) => void;
+  updateChecklist: (appointmentId: string, checklist: Partial<Checklist>) => void;
   addInjectionRecord: (record: InjectionRecord) => void;
-  addAppointment: (appointment: Appointment, patient: Patient) => void;
+  addAppointment: (
+    appointment: Appointment,
+    patient: Patient,
+    checklistData?: Omit<Checklist, "id" | "appointmentId" | "passed">
+  ) => void;
   cancelAppointment: (id: string) => void;
   rescheduleAppointment: (id: string, date: string, timeSlot: string) => void;
   occupyBed: (bedId: string, appointmentId: string) => void;
   releaseBed: (bedId: string) => void;
+
+  advanceFlow: (appointmentId: string, options?: { skipRescan?: boolean }) => void;
+  skipFlowNode: (appointmentId: string, nodeType: FlowNodeType) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -101,14 +121,97 @@ export const useAppStore = create<AppState>((set, get) => ({
   addChecklist: (checklist) =>
     set((state) => ({ checklists: [...state.checklists, checklist] })),
 
-  addInjectionRecord: (record) =>
-    set((state) => ({ injectionRecords: [...state.injectionRecords, record] })),
+  updateChecklist: (appointmentId, checklistUpdate) =>
+    set((state) => {
+      const existing = state.checklists.find((c) => c.appointmentId === appointmentId);
+      if (existing) {
+        return {
+          checklists: state.checklists.map((c) =>
+            c.appointmentId === appointmentId ? { ...c, ...checklistUpdate } : c
+          ),
+        };
+      }
+      return state;
+    }),
 
-  addAppointment: (appointment, patient) =>
-    set((state) => ({
-      appointments: [...state.appointments, appointment],
-      patients: [...state.patients, patient],
-    })),
+  addInjectionRecord: (record) =>
+    set((state) => {
+      const nodes = state.flowNodes.filter((n) => n.appointmentId === record.appointmentId);
+      const injectionNode = nodes.find((n) => n.nodeType === "injection");
+      const restNode = nodes.find((n) => n.nodeType === "rest");
+      const now = record.injectTime;
+
+      let updatedFlowNodes = state.flowNodes;
+      if (injectionNode) {
+        updatedFlowNodes = updatedFlowNodes.map((n) =>
+          n.id === injectionNode.id
+            ? { ...n, status: "completed" as NodeStatus, startTime: now, endTime: now }
+            : n
+        );
+      }
+      if (restNode) {
+        updatedFlowNodes = updatedFlowNodes.map((n) =>
+          n.id === restNode.id ? { ...n, status: "in_progress" as NodeStatus, startTime: now } : n
+        );
+      }
+
+      let updatedAppointments = state.appointments;
+      const appt = state.appointments.find((a) => a.id === record.appointmentId);
+      if (appt && appt.status !== "in_progress") {
+        updatedAppointments = updatedAppointments.map((a) =>
+          a.id === record.appointmentId ? { ...a, status: "in_progress" as AppointmentStatus } : a
+        );
+      }
+
+      return {
+        injectionRecords: [...state.injectionRecords, record],
+        flowNodes: updatedFlowNodes,
+        appointments: updatedAppointments,
+      };
+    }),
+
+  addAppointment: (appointment, patient, checklistData) =>
+    set((state) => {
+      const newFlowNodes: FlowNode[] = FLOW_NODE_ORDER.map((nodeType, index) => ({
+        id: `fn_${appointment.id}_${index}`,
+        appointmentId: appointment.id,
+        nodeType,
+        status: "pending" as NodeStatus,
+      }));
+
+      const newReport: Report = {
+        id: `r_${appointment.id}`,
+        appointmentId: appointment.id,
+        radiologist: "待分配",
+        status: "pending" as ReportStatus,
+        urgency: "normal" as ReportUrgency,
+      };
+
+      let newChecklists = state.checklists;
+      if (checklistData) {
+        const passed =
+          !checklistData.isPregnant &&
+          checklistData.bloodGlucose <= 11 &&
+          checklistData.fastingHours >= 4;
+        newChecklists = [
+          ...state.checklists,
+          {
+            id: `cl_${appointment.id}`,
+            appointmentId: appointment.id,
+            ...checklistData,
+            passed,
+          },
+        ];
+      }
+
+      return {
+        appointments: [...state.appointments, appointment],
+        patients: [...state.patients, patient],
+        flowNodes: [...state.flowNodes, ...newFlowNodes],
+        reports: [...state.reports, newReport],
+        checklists: newChecklists,
+      };
+    }),
 
   cancelAppointment: (id) =>
     set((state) => ({
@@ -139,4 +242,102 @@ export const useAppStore = create<AppState>((set, get) => ({
         b.id === bedId ? { ...b, occupied: false, appointmentId: undefined, occupiedSince: undefined } : b
       ),
     })),
+
+  advanceFlow: (appointmentId, options = {}) => {
+    const { skipRescan = true } = options;
+    set((state) => {
+      const nodes = state.flowNodes
+        .filter((n) => n.appointmentId === appointmentId)
+        .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+
+      if (nodes.length === 0) return state;
+
+      const currentIdx = nodes.findIndex((n) => n.status === "in_progress");
+      const pendingIdx = nodes.findIndex((n) => n.status === "pending");
+
+      let targetCurrentIdx = currentIdx;
+      let targetNextIdx = pendingIdx;
+
+      if (currentIdx === -1 && pendingIdx !== -1) {
+        targetNextIdx = pendingIdx;
+      } else if (currentIdx !== -1) {
+        targetCurrentIdx = currentIdx;
+        targetNextIdx = currentIdx + 1;
+      }
+
+      if (skipRescan && targetNextIdx < nodes.length && nodes[targetNextIdx].nodeType === "rescan") {
+        nodes[targetNextIdx].status = "skipped";
+        targetNextIdx++;
+      }
+
+      while (
+        targetNextIdx < nodes.length &&
+        nodes[targetNextIdx].status === "skipped"
+      ) {
+        targetNextIdx++;
+      }
+
+      const now = new Date().toISOString();
+      let updatedNodes = [...state.flowNodes];
+
+      if (targetCurrentIdx !== -1 && nodes[targetCurrentIdx]) {
+        const nodeId = nodes[targetCurrentIdx].id;
+        updatedNodes = updatedNodes.map((n) =>
+          n.id === nodeId ? { ...n, status: "completed" as NodeStatus, endTime: now } : n
+        );
+      }
+
+      if (targetNextIdx < nodes.length && nodes[targetNextIdx]) {
+        const nextNodeId = nodes[targetNextIdx].id;
+        updatedNodes = updatedNodes.map((n) =>
+          n.id === nextNodeId ? { ...n, status: "in_progress" as NodeStatus, startTime: now } : n
+        );
+      }
+
+      const allCompleted = updatedNodes
+        .filter((n) => n.appointmentId === appointmentId)
+        .every((n) => n.status === "completed" || n.status === "skipped");
+
+      let updatedAppointments = state.appointments;
+      let updatedReports = state.reports;
+
+      if (allCompleted) {
+        updatedAppointments = updatedAppointments.map((a) =>
+          a.id === appointmentId ? { ...a, status: "completed" as AppointmentStatus } : a
+        );
+      } else if (pendingIdx === 0 || currentIdx !== -1) {
+        updatedAppointments = updatedAppointments.map((a) =>
+          a.id === appointmentId ? { ...a, status: "in_progress" as AppointmentStatus } : a
+        );
+      }
+
+      if (allCompleted) {
+        updatedReports = updatedReports.map((r) =>
+          r.appointmentId === appointmentId && r.status === "pending"
+            ? { ...r, status: "reporting" as ReportStatus }
+            : r
+        );
+      }
+
+      return {
+        flowNodes: updatedNodes,
+        appointments: updatedAppointments,
+        reports: updatedReports,
+      };
+    });
+  },
+
+  skipFlowNode: (appointmentId, nodeType) => {
+    set((state) => {
+      const node = state.flowNodes.find(
+        (n) => n.appointmentId === appointmentId && n.nodeType === nodeType
+      );
+      if (!node) return state;
+      return {
+        flowNodes: state.flowNodes.map((n) =>
+          n.id === node.id ? { ...n, status: "skipped" as NodeStatus } : n
+        ),
+      };
+    });
+  },
 }));

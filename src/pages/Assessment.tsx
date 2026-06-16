@@ -33,8 +33,11 @@ export default function Assessment() {
     currentDate,
     getPatientById,
     getChecklistByAppointment,
+    getAppointmentById,
     updateAppointmentStatus,
     addChecklist,
+    updateChecklist,
+    advanceFlow,
   } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -95,20 +98,27 @@ export default function Assessment() {
   };
 
   const handleCheckIn = (id: string) => {
-    updateAppointmentStatus(id, "checked_in");
+    advanceFlow(id);
   };
 
   const handleSubmitChecklist = () => {
     if (!selectedAppointment) return;
     const passed = validateChecklist();
-    addChecklist({
-      id: `cl_${Date.now()}`,
-      appointmentId: selectedAppointment.id,
-      ...checklist,
-      passed,
-    });
+    if (existingChecklist) {
+      updateChecklist(selectedAppointment.id, { ...checklist, passed });
+    } else {
+      addChecklist({
+        id: `cl_${Date.now()}`,
+        appointmentId: selectedAppointment.id,
+        ...checklist,
+        passed,
+      });
+    }
     if (passed) {
-      updateAppointmentStatus(selectedAppointment.id, "checked_in");
+      const appt = getAppointmentById?.(selectedAppointment.id);
+      if (appt?.status === "pending") {
+        advanceFlow(selectedAppointment.id);
+      }
     }
   };
 

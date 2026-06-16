@@ -34,6 +34,7 @@ export default function Injection() {
     injectionRecords,
     getPatientById,
     getInjectionByAppointment,
+    getFlowNodesByAppointment,
     addInjectionRecord,
     occupyBed,
     releaseBed,
@@ -55,14 +56,19 @@ export default function Injection() {
 
   const todaysWaiting = useMemo(() => {
     return appointments
-      .filter((a) => a.date === currentDate && a.status === "checked_in")
+      .filter((a) => a.date === currentDate && a.status !== "cancelled" && a.status !== "no_show")
+      .filter((a) => {
+        const nodes = getFlowNodesByAppointment?.(a.id) ?? [];
+        const injectionNode = nodes.find((n) => n.nodeType === "injection");
+        return injectionNode?.status === "pending" || injectionNode?.status === "in_progress";
+      })
       .filter((a) => {
         if (!searchQuery) return true;
         const p = getPatientById(a.patientId);
         return p?.name.includes(searchQuery);
       })
       .sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
-  }, [appointments, currentDate, searchQuery, getPatientById]);
+  }, [appointments, currentDate, searchQuery, getPatientById, getFlowNodesByAppointment]);
 
   const occupiedBedsByZone = useMemo(() => {
     const zones: Record<string, typeof restBeds> = {};
