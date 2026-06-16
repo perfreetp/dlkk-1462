@@ -15,6 +15,8 @@ import type {
   FlowNodeType,
   ReportUrgency,
   ChecklistSource,
+  ReportTimeoutRules,
+  TracerBatch,
 } from "@/types";
 import { patients as mockPatients } from "@/mock/patients";
 import { appointments as mockAppointments } from "@/mock/appointments";
@@ -26,6 +28,7 @@ import {
   reports as mockReports,
   restBeds as mockRestBeds,
   statisticsData as mockStatisticsData,
+  tracerBatches as mockTracerBatches,
 } from "@/mock";
 
 const FLOW_NODE_ORDER: FlowNodeType[] = [
@@ -49,6 +52,8 @@ interface AppState {
   restBeds: RestBed[];
   statistics: StatisticsData;
   currentDate: string;
+  reportTimeoutRules: ReportTimeoutRules;
+  tracerBatches: TracerBatch[];
 
   getPatientById: (id: string) => Patient | undefined;
   getAppointmentsByDate: (date: string) => Appointment[];
@@ -66,6 +71,14 @@ interface AppState {
   addChecklist: (checklist: Omit<Checklist, "id" | "createdAt">) => void;
   updateChecklist: (appointmentId: string, checklist: Partial<Checklist>, source?: ChecklistSource) => void;
   addInjectionRecord: (record: InjectionRecord) => boolean;
+  canPerformInjection: (appointmentId: string) => boolean;
+  getTracerBatchesByType: (tracerType: string) => TracerBatch[];
+  getAvailableTracerBatch: (tracerType: string) => TracerBatch | undefined;
+  canDeductTracer: (batchId: string, activity: number) => boolean;
+  deductTracerStock: (batchId: string, activity: number) => boolean;
+  updateReportTimeoutRules: (rules: Partial<ReportTimeoutRules>) => void;
+  isReportTimeout: (reportId: string) => boolean;
+  isReportWarning: (reportId: string) => boolean;
   addAppointment: (
     appointment: Appointment,
     patient: Patient,
@@ -91,6 +104,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   restBeds: mockRestBeds,
   statistics: mockStatisticsData,
   currentDate: "2026-06-16",
+  reportTimeoutRules: {
+    normalHours: 24,
+    urgentHours: 4,
+    warningThreshold: 0.8,
+  },
+  tracerBatches: mockTracerBatches,
 
   getPatientById: (id) => get().patients.find((p) => p.id === id),
   getAppointmentsByDate: (date) => get().appointments.filter((a) => a.date === date),
@@ -177,12 +196,105 @@ export const useAppStore = create<AppState>((set, get) => ({
       return state;
     }),
 
+  canPerformInjection: (appointmentId) => {
+    const nodes = get()
+      .getFlowNodesByAppointment(appointmentId)
+      .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+    const injectionNode = nodes.find((n) => n.nodeType === "injection");
+    if (!injectionNode) return false;
+    if (injectionNode.status === "completed") return false;
+    if (injectionNode.status === "in_progress") return true;
+    return get().canAdvanceToNode(appointmentId, "injection");
+  },
+
+  getTracerBatchesByType: (tracerType) =>
+    get().tracerBatches.filter((b) => b.tracerType === tracerType),
+
+  getAvailableTracerBatch: (tracerType) => {
+    const batches = get()
+      .getTracerBatchesByType(tracerType)
+      .filter((b) => b.status === "available" && b.remainingActivity > 0)
+      .sort((a, b) => new Date(a.expiryTime).getTime() - new Date(b.expiryTime).getTime());
+    return batches[0];
+  },
+
+  canDeductTracer: (batchId, activity) => {
+    const batch = get().tracerBatches.find((b) => b.id === batchId);
+    if (!batch) return false;
+    return batch.remainingActivity >= activity;
+  },
+
+  deductTracerStock: (batchId, activity) => {
+    if (!get().canDeductTracer(batchId, activity)) return false;
+    set((state) => {
+      const updatedBatches = state.tracerBatches.map((b) => {
+        if (b.id !== batchId) return b;
+        const remaining = b.remainingActivity - activity;
+        const ratio = remaining / b.totalActivity;
+        let status: TracerBatch["status"] = "available";
+        if (remaining <= 0) status = "depleted";
+        else if (ratio < 0.2) status = "low_stock";
+        return { ...b, remainingActivity: remaining, status };
+      });
+      return { tracerBatches: updatedBatches };
+    });
+    return true;
+  },
+
+  updateReportTimeoutRules: (rules) =>
+    set((state) => ({
+      reportTimeoutRules: { ...state.reportTimeoutRules, ...rules },
+    })),
+
+  isReportTimeout: (reportId) => {
+    const report = get().reports.find((r) => r.id === reportId);
+    if (!report || report.status === "published") return false;
+    const nodes = get().getFlowNodesByAppointment(report.appointmentId);
+    const dischargeNode = nodes.find((n) => n.nodeType === "discharge");
+    if (!dischargeNode?.endTime) return false;
+    const elapsedMinutes = (Date.now() - new Date(dischargeNode.endTime).getTime()) / 60000;
+    const limitHours = report.urgency === "urgent"
+      ? get().reportTimeoutRules.urgentHours
+      : get().reportTimeoutRules.normalHours;
+    return elapsedMinutes > limitHours * 60;
+  },
+
+  isReportWarning: (reportId) => {
+    const report = get().reports.find((r) => r.id === reportId);
+    if (!report || report.status === "published") return false;
+    if (get().isReportTimeout(reportId)) return false;
+    const nodes = get().getFlowNodesByAppointment(report.appointmentId);
+    const dischargeNode = nodes.find((n) => n.nodeType === "discharge");
+    if (!dischargeNode?.endTime) return false;
+    const elapsedMinutes = (Date.now() - new Date(dischargeNode.endTime).getTime()) / 60000;
+    const limitHours = report.urgency === "urgent"
+      ? get().reportTimeoutRules.urgentHours
+      : get().reportTimeoutRules.normalHours;
+    const warningMinutes = limitHours * 60 * get().reportTimeoutRules.warningThreshold;
+    return elapsedMinutes > warningMinutes;
+  },
+
   addInjectionRecord: (record) => {
-    const canInject = get().canAdvanceToNode(record.appointmentId, "injection");
+    const canInject = get().canPerformInjection(record.appointmentId);
     if (!canInject) {
       console.warn("流程异常：未到注射环节，无法登记注射");
       return false;
     }
+
+    const batch = get().tracerBatches.find((b) => b.batchNo === record.tracerBatch);
+    if (!batch) {
+      console.warn("药物异常：未找到对应示踪剂批次");
+      return false;
+    }
+    if (batch.tracerType !== record.tracerType) {
+      console.warn("药物异常：批次与示踪剂类型不匹配");
+      return false;
+    }
+    if (!get().canDeductTracer(batch.id, record.tracerActivity)) {
+      console.warn("药物异常：剩余药量不足");
+      return false;
+    }
+
     set((state) => {
       const nodes = state.flowNodes.filter((n) => n.appointmentId === record.appointmentId);
       const injectionNode = nodes.find((n) => n.nodeType === "injection");
@@ -211,10 +323,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
       }
 
+      const updatedBatches = state.tracerBatches.map((b) => {
+        if (b.id !== batch.id) return b;
+        const remaining = b.remainingActivity - record.tracerActivity;
+        const ratio = remaining / b.totalActivity;
+        let status: TracerBatch["status"] = "available";
+        if (remaining <= 0) status = "depleted";
+        else if (ratio < 0.2) status = "low_stock";
+        return { ...b, remainingActivity: remaining, status };
+      });
+
       return {
         injectionRecords: [...state.injectionRecords, record],
         flowNodes: updatedFlowNodes,
         appointments: updatedAppointments,
+        tracerBatches: updatedBatches,
       };
     });
     return true;

@@ -6,6 +6,7 @@ import type {
   Report,
   RestBed,
   StatisticsData,
+  TracerBatch,
 } from "@/types";
 
 export const flowNodes: FlowNode[] = [
@@ -192,3 +193,39 @@ export const statisticsData: StatisticsData = {
     { date: "6月", count: 168 },
   ],
 };
+
+export const tracerBatches: TracerBatch[] = [
+  {
+    id: "tb1",
+    tracerType: "18F-FDG",
+    batchNo: "FDG-20260616-A",
+    totalActivity: 1850,
+    remainingActivity: 1110,
+    calibrationTime: "2026-06-16T06:00:00Z",
+    expiryTime: "2026-06-16T14:00:00Z",
+    status: "available",
+    manufacturer: "原子高科",
+  },
+  {
+    id: "tb2",
+    tracerType: "18F-FDG",
+    batchNo: "FDG-20260616-B",
+    totalActivity: 1850,
+    remainingActivity: 1850,
+    calibrationTime: "2026-06-16T10:00:00Z",
+    expiryTime: "2026-06-16T18:00:00Z",
+    status: "available",
+    manufacturer: "原子高科",
+  },
+  {
+    id: "tb3",
+    tracerType: "99mTc-MDP",
+    batchNo: "MDP-20260616-A",
+    totalActivity: 5550,
+    remainingActivity: 3700,
+    calibrationTime: "2026-06-16T07:00:00Z",
+    expiryTime: "2026-06-16T12:00:00Z",
+    status: "available",
+    manufacturer: "中国同辐",
+  },
+];

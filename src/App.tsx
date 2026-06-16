@@ -6,6 +6,7 @@ import Assessment from "@/pages/Assessment";
 import Injection from "@/pages/Injection";
 import Report from "@/pages/Report";
 import Statistics from "@/pages/Statistics";
+import Handover from "@/pages/Handover";
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/injection" element={<Injection />} />
           <Route path="/report" element={<Report />} />
           <Route path="/statistics" element={<Statistics />} />
+          <Route path="/handover" element={<Handover />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

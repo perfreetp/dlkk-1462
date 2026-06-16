@@ -13,6 +13,14 @@ import {
   ChevronRight,
   Clock,
   Stethoscope,
+  Eye,
+  User,
+  Phone,
+  FileText,
+  CheckCircle2,
+  XCircle,
+  Info,
+  Clipboard,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import {
@@ -26,6 +34,9 @@ import {
   patientTagLabel,
   patientTagBadgeClass,
   examTypes,
+  checklistSourceLabel,
+  checklistSourceBadgeClass,
+  formatDateTime,
 } from "@/utils";
 import type { PatientType, PatientTag } from "@/types";
 
@@ -35,6 +46,8 @@ export default function Appointment() {
     patients,
     currentDate,
     getPatientById,
+    getAppointmentById,
+    getChecklistByAppointment,
     cancelAppointment,
     rescheduleAppointment,
     addAppointment,
@@ -46,6 +59,8 @@ export default function Appointment() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState<string | null>(null);
+  const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   const [newForm, setNewForm] = useState({
     name: "",
@@ -337,30 +352,40 @@ export default function Appointment() {
                               )}
                             </div>
                             <div className="flex flex-col items-end gap-2 shrink-0">
-                              <span className={cn("badge border", appointmentStatusBadgeClass[a.status])}>
-                                {appointmentStatusLabel[a.status]}
-                              </span>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  onClick={() => {
-                                    setRescheduleTarget(a.id);
-                                    setShowRescheduleModal(true);
-                                  }}
-                                  className="p-1 rounded text-slate-400 hover:text-medical-600 hover:bg-medical-50"
-                                  title="改约"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => cancelAppointment(a.id)}
-                                  className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                                  title="取消"
-                                  disabled={a.status === "cancelled"}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
+                                <span className={cn("badge border", appointmentStatusBadgeClass[a.status])}>
+                                  {appointmentStatusLabel[a.status]}
+                                </span>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDetailId(a.id);
+                                      setShowDetail(true);
+                                    }}
+                                    className="p-1 rounded text-slate-400 hover:text-medical-600 hover:bg-medical-50"
+                                    title="查看详情"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setRescheduleTarget(a.id);
+                                      setShowRescheduleModal(true);
+                                    }}
+                                    className="p-1 rounded text-slate-400 hover:text-medical-600 hover:bg-medical-50"
+                                    title="改约"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => cancelAppointment(a.id)}
+                                    className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                                    title="取消"
+                                    disabled={a.status === "cancelled"}
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
                           </div>
                         </div>
                       );
@@ -673,6 +698,189 @@ export default function Appointment() {
           </div>
         </div>
       )}
+
+      {showDetail && selectedDetailId && (() => {
+        const a = getAppointmentById?.(selectedDetailId);
+        const p = a ? getPatientById(a.patientId) : null;
+        const cl = selectedDetailId ? getChecklistByAppointment(selectedDetailId) : null;
+        if (!a || !p) return null;
+
+        const closeDetail = () => {
+          setShowDetail(false);
+          setTimeout(() => setSelectedDetailId(null), 300);
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end animate-fade-in">
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={closeDetail} />
+            <div className="relative w-[480px] bg-white shadow-2xl h-full overflow-y-auto scrollbar-thin animate-slide-in-right">
+              <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-medical-600" />
+                  <h3 className="text-base font-semibold text-slate-900">预约详情</h3>
+                </div>
+                <button onClick={closeDetail} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-medical-500 to-medical-700 flex items-center justify-center shrink-0">
+                    <User className="w-7 h-7 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-semibold text-slate-900">{p.name}</span>
+                      <span className={cn("badge border", patientTypeBadgeClass[p.patientType])}>
+                        {patientTypeLabel[p.patientType]}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {p.age}{p.gender} · {p.patientNo}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1 text-sm text-slate-500">
+                      <Phone className="w-3.5 h-3.5" />
+                      {p.phone}
+                    </div>
+                  </div>
+                  <span className={cn("badge border", appointmentStatusBadgeClass[a.status])}>
+                    {appointmentStatusLabel[a.status]}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5" />
+                    预约信息
+                  </h4>
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">检查类型</span>
+                      <span className="text-slate-900 font-medium">{a.examType}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">检查项目</span>
+                      <span className="text-slate-900 font-medium">{a.examSubtype}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">预约日期</span>
+                      <span className="text-slate-900 font-mono">{a.date}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">预约时段</span>
+                      <span className="text-slate-900 font-mono font-medium">{a.timeSlot}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">来源号</span>
+                      <span className="text-slate-900 font-mono">{a.sourceNo}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">申请科室</span>
+                      <span className="text-slate-900">{p.department}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">申请医师</span>
+                      <span className="text-slate-900">{p.doctor}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {p.tags.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">重点人群标记</h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {p.tags.map((tag) => (
+                        <span key={tag} className={cn("badge border", patientTagBadgeClass[tag])}>
+                          {patientTagLabel[tag]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                      <Clipboard className="w-3.5 h-3.5" />
+                      前置核查结果
+                    </h4>
+                    {cl && (
+                      <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", checklistSourceBadgeClass[cl.source])}>
+                        {checklistSourceLabel[cl.source]}
+                      </span>
+                    )}
+                  </div>
+                  {cl ? (
+                    <div className="p-4 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center gap-2">
+                        {cl.passed ? (
+                          <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            核查通过
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-50 px-2 py-1 rounded-md border border-rose-200">
+                            <XCircle className="w-3.5 h-3.5" />
+                            核查未通过
+                          </span>
+                        )}
+                        {cl.updatedAt && (
+                          <span className="text-[10px] text-slate-400">
+                            最后更新：{formatDateTime(cl.updatedAt)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 rounded-lg bg-slate-50 space-y-1">
+                          <div className="text-xs text-slate-500">禁食时长</div>
+                          <div className="text-sm font-semibold text-slate-900">{cl.fastingHours} 小时</div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50 space-y-1">
+                          <div className="text-xs text-slate-500">血糖值</div>
+                          <div className="text-sm font-semibold text-slate-900">{cl.bloodGlucose} mmol/L</div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50 space-y-1">
+                          <div className="text-xs text-slate-500">妊娠</div>
+                          <div className={cn("text-sm font-semibold", cl.isPregnant ? "text-rose-600" : "text-slate-900")}>
+                            {cl.isPregnant ? "是" : "否"}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50 space-y-1">
+                          <div className="text-xs text-slate-500">哺乳</div>
+                          <div className={cn("text-sm font-semibold", cl.isLactating ? "text-amber-600" : "text-slate-900")}>
+                            {cl.isLactating ? "是" : "否"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-slate-500">近期增强检查史</div>
+                        <div className="text-sm text-slate-900">{cl.recentContrastExam}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-slate-500">过敏史</div>
+                        <div className="text-sm text-slate-900">{cl.allergies}</div>
+                      </div>
+                      {cl.notes && (
+                        <div className="space-y-1">
+                          <div className="text-xs text-slate-500">核查备注</div>
+                          <div className="text-sm text-slate-900">{cl.notes}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-xl border border-dashed border-slate-200 text-center">
+                      <Info className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">暂无核查记录</p>
+                      <p className="text-xs text-slate-300 mt-1">到检时将进行现场评估</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

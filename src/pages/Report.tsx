@@ -18,6 +18,10 @@ import {
   Activity,
   Timer,
   Zap,
+  Settings,
+  X,
+  AlertCircle,
+  Info as InfoIcon,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import {
@@ -42,21 +46,16 @@ export default function Report() {
     getAppointmentById,
     getFlowNodesByAppointment,
     updateReportStatus,
+    reportTimeoutRules,
+    updateReportTimeoutRules,
+    isReportTimeout,
+    isReportWarning,
   } = useAppStore();
 
   const [filterStatus, setFilterStatus] = useState<ReportStatus | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  const REPORT_TIMEOUT_HOURS = 24;
-
-  const isTimeout = (report: typeof reports[0], nodes: FlowNode[]): boolean => {
-    if (report.status === "published") return false;
-    const dischargeNode = nodes.find((n) => n.nodeType === "discharge");
-    if (!dischargeNode?.endTime) return false;
-    const elapsedMinutes = getMinutesElapsed(dischargeNode.endTime);
-    return elapsedMinutes > REPORT_TIMEOUT_HOURS * 60;
-  };
+  const [showRulesPanel, setShowRulesPanel] = useState(false);
 
   const getSortKey = (report: typeof reports[0], nodes: FlowNode[]): number => {
     const dischargeNode = nodes.find((n) => n.nodeType === "discharge");
@@ -74,9 +73,10 @@ export default function Report() {
         const a = getAppointmentById(r.appointmentId);
         const p = a ? getPatientById(a.patientId) : null;
         const nodes = getFlowNodesByAppointment(r.appointmentId);
-        const timeout = isTimeout(r, nodes);
+        const timeout = isReportTimeout(r.id);
+        const warning = !timeout && isReportWarning(r.id);
         const sortKey = getSortKey(r, nodes);
-        return { r, a, p, nodes, timeout, sortKey };
+        return { r, a, p, nodes, timeout, warning, sortKey };
       })
       .filter(({ r, a, p }) => {
         if (!a || !p) return false;
@@ -94,9 +94,10 @@ export default function Report() {
       .sort((x, y) => {
         if (x.r.urgency !== y.r.urgency) return x.r.urgency === "urgent" ? -1 : 1;
         if (x.timeout !== y.timeout) return x.timeout ? -1 : 1;
+        if (x.warning !== y.warning) return x.warning ? -1 : 1;
         return y.sortKey - x.sortKey;
       });
-  }, [reports, filterStatus, searchQuery, getAppointmentById, getPatientById, getFlowNodesByAppointment]);
+  }, [reports, filterStatus, searchQuery, getAppointmentById, getPatientById, getFlowNodesByAppointment, isReportTimeout, isReportWarning]);
 
   const stats = useMemo(() => ({
     total: reports.length,
@@ -105,12 +106,9 @@ export default function Report() {
     reviewed: reports.filter((r) => r.status === "reviewed").length,
     published: reports.filter((r) => r.status === "published").length,
     urgent: reports.filter((r) => r.urgency === "urgent" && r.status !== "published").length,
-    timeout: reports.filter((r) => {
-      if (r.status === "published") return false;
-      const nodes = getFlowNodesByAppointment(r.appointmentId);
-      return isTimeout(r, nodes);
-    }).length,
-  }), [reports, getFlowNodesByAppointment]);
+    timeout: reports.filter((r) => r.status !== "published" && isReportTimeout(r.id)).length,
+    warning: reports.filter((r) => r.status !== "published" && !isReportTimeout(r.id) && isReportWarning(r.id)).length,
+  }), [reports, isReportTimeout, isReportWarning]);
 
   const statusFlow: ReportStatus[] = ["pending", "reporting", "reviewed", "published"];
 
@@ -184,14 +182,15 @@ export default function Report() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="grid grid-cols-7 gap-4">
+      <div className="grid grid-cols-8 gap-4">
         {[
           { label: "待报告", value: stats.pending, color: "slate", urgent: false },
           { label: "报告中", value: stats.reporting, color: "amber", urgent: false },
           { label: "已审核", value: stats.reviewed, color: "sky", urgent: false },
           { label: "已发布", value: stats.published, color: "emerald", urgent: false },
           { label: "加急件", value: stats.urgent, color: "rose", urgent: true },
-          { label: "已超时", value: stats.timeout, color: "amber", urgent: true },
+          { label: "已超时", value: stats.timeout, color: "rose", urgent: true },
+          { label: "风险预警", value: stats.warning, color: "amber", urgent: true },
           { label: "工作总量", value: stats.total, color: "medical", urgent: false },
         ].map((s) => {
           const colorMap: Record<string, { bg: string; text: string; dot: string }> = {
@@ -254,6 +253,13 @@ export default function Report() {
                 按完成时间排序
               </span>
             </div>
+            <button
+              onClick={() => setShowRulesPanel(true)}
+              className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              超时规则
+            </button>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -292,7 +298,7 @@ export default function Report() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredReports.map(({ r, a, p, nodes, timeout }) => {
+              {filteredReports.map(({ r, a, p, nodes, timeout, warning }) => {
                 const isExpanded = expandedId === r.id;
                 const isUrgent = r.urgency === "urgent";
                 const dischargeNode = nodes.find((n) => n.nodeType === "discharge");
@@ -302,8 +308,9 @@ export default function Report() {
                       key={r.id}
                       className={cn(
                         "hover:bg-slate-50/50 transition-colors cursor-pointer",
-                        timeout && "bg-amber-50/40",
-                        isUrgent && r.status !== "published" && !timeout && "bg-rose-50/30"
+                        timeout && "bg-rose-50/30",
+                        !timeout && warning && "bg-amber-50/40",
+                        isUrgent && r.status !== "published" && !timeout && !warning && "bg-rose-50/20"
                       )}
                       onClick={() => setExpandedId(isExpanded ? null : r.id)}
                     >
@@ -316,20 +323,26 @@ export default function Report() {
                             <User className="w-4.5 h-4.5 text-white" />
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-sm font-medium text-slate-900">{p.name}</span>
                               <span className={cn("badge border text-[10px]", patientTypeBadgeClass[p.patientType])}>
                                 {patientTypeLabel[p.patientType]}
                               </span>
                               {timeout && (
-                                <span className="flex items-center gap-0.5 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-medium">
-                                  <Timer className="w-3 h-3" />
+                                <span className="flex items-center gap-0.5 text-[10px] text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded font-medium">
+                                  <AlertTriangle className="w-3 h-3" />
                                   已超时
                                 </span>
                               )}
-                              {isUrgent && r.status !== "published" && !timeout && (
-                                <span className="flex items-center gap-0.5 text-[10px] text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded font-medium">
-                                  <AlertTriangle className="w-3 h-3" />
+                              {!timeout && warning && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-medium">
+                                  <AlertCircle className="w-3 h-3" />
+                                  风险预警
+                                </span>
+                              )}
+                              {isUrgent && r.status !== "published" && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded font-medium">
+                                  <Zap className="w-3 h-3" />
                                   加急
                                 </span>
                               )}
@@ -507,6 +520,119 @@ export default function Report() {
           </div>
         )}
       </div>
+
+      {showRulesPanel && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-slide-in">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-medical-600" />
+                <h3 className="text-base font-semibold text-slate-900">报告超时规则设置</h3>
+              </div>
+              <button onClick={() => setShowRulesPanel(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="p-4 rounded-lg bg-sky-50 border border-sky-100">
+                <div className="flex items-start gap-2">
+                  <InfoIcon className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-sky-700">
+                    超时规则将全局应用于报告列表、当日看板和运营统计，用于计算风险预警和超时数量。
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="label flex items-center justify-between">
+                  <span>普通报告时限</span>
+                  <span className="text-xs text-slate-400">检查完成后 {reportTimeoutRules.normalHours} 小时内出报告</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="1"
+                    max="72"
+                    value={reportTimeoutRules.normalHours}
+                    onChange={(e) => updateReportTimeoutRules({ normalHours: Number(e.target.value) })}
+                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-medical-600"
+                  />
+                  <span className="w-16 text-right text-sm font-mono font-semibold text-medical-700">
+                    {reportTimeoutRules.normalHours}h
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="label flex items-center justify-between">
+                  <span>加急报告时限</span>
+                  <span className="text-xs text-rose-500">检查完成后 {reportTimeoutRules.urgentHours} 小时内出报告</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="24"
+                    step="0.5"
+                    value={reportTimeoutRules.urgentHours}
+                    onChange={(e) => updateReportTimeoutRules({ urgentHours: Number(e.target.value) })}
+                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                  />
+                  <span className="w-16 text-right text-sm font-mono font-semibold text-rose-600">
+                    {reportTimeoutRules.urgentHours}h
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="label flex items-center justify-between">
+                  <span>风险预警阈值</span>
+                  <span className="text-xs text-amber-600">
+                    剩余 {Math.round((1 - reportTimeoutRules.warningThreshold) * 100)}% 时间时预警
+                  </span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="0.95"
+                    step="0.05"
+                    value={reportTimeoutRules.warningThreshold}
+                    onChange={(e) => updateReportTimeoutRules({ warningThreshold: Number(e.target.value) })}
+                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+                  <span className="w-16 text-right text-sm font-mono font-semibold text-amber-600">
+                    {Math.round(reportTimeoutRules.warningThreshold * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="divider" />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-center">
+                  <div className="text-xs text-slate-500">普通风险预警</div>
+                  <div className="text-lg font-bold font-mono text-amber-600 mt-1">
+                    {Math.round(reportTimeoutRules.normalHours * reportTimeoutRules.warningThreshold)}h
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-center">
+                  <div className="text-xs text-rose-500">加急风险预警</div>
+                  <div className="text-lg font-bold font-mono text-rose-600 mt-1">
+                    {(reportTimeoutRules.urgentHours * reportTimeoutRules.warningThreshold).toFixed(1)}h
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowRulesPanel(false)} className="btn-primary">
+                <CheckCircle2 className="w-4 h-4" />
+                确认设置
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

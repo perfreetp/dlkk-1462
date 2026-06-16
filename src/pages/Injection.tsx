@@ -34,12 +34,14 @@ export default function Injection() {
     currentDate,
     restBeds,
     injectionRecords,
+    tracerBatches,
     getPatientById,
     getInjectionByAppointment,
     getFlowNodesByAppointment,
     getCurrentFlowNode,
-    canAdvanceToNode,
+    canPerformInjection,
     addInjectionRecord,
+    getTracerBatchesByType,
     occupyBed,
     releaseBed,
   } = useAppStore();
@@ -63,18 +65,42 @@ export default function Injection() {
   const todaysWaiting = useMemo(() => {
     return appointments
       .filter((a) => a.date === currentDate && a.status !== "cancelled" && a.status !== "no_show")
-      .filter((a) => {
-        const nodes = getFlowNodesByAppointment?.(a.id) ?? [];
-        const injectionNode = nodes.find((n) => n.nodeType === "injection");
-        return injectionNode?.status === "pending" || injectionNode?.status === "in_progress";
-      })
+      .filter((a) => canPerformInjection(a.id))
       .filter((a) => {
         if (!searchQuery) return true;
         const p = getPatientById(a.patientId);
         return p?.name.includes(searchQuery);
       })
       .sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
-  }, [appointments, currentDate, searchQuery, getPatientById, getFlowNodesByAppointment]);
+  }, [appointments, currentDate, searchQuery, getPatientById, canPerformInjection]);
+
+  const availableBatches = useMemo(() => {
+    return getTracerBatchesByType(injectForm.tracerType).filter(
+      (b) => b.status !== "depleted" && b.status !== "expired"
+    );
+  }, [injectForm.tracerType, getTracerBatchesByType]);
+
+  const selectedBatch = useMemo(() => {
+    return tracerBatches.find((b) => b.batchNo === injectForm.tracerBatch);
+  }, [injectForm.tracerBatch, tracerBatches]);
+
+  const isStockSufficient = useMemo(() => {
+    if (!selectedBatch) return false;
+    return selectedBatch.remainingActivity >= injectForm.tracerActivity;
+  }, [selectedBatch, injectForm.tracerActivity]);
+
+  const tracerStats = useMemo(() => {
+    const stats: Record<string, { total: number; remaining: number; batchCount: number }> = {};
+    tracerBatches.forEach((b) => {
+      if (!stats[b.tracerType]) {
+        stats[b.tracerType] = { total: 0, remaining: 0, batchCount: 0 };
+      }
+      stats[b.tracerType].total += b.totalActivity;
+      stats[b.tracerType].remaining += b.remainingActivity;
+      stats[b.tracerType].batchCount += 1;
+    });
+    return stats;
+  }, [tracerBatches]);
 
   const occupiedBedsByZone = useMemo(() => {
     const zones: Record<string, typeof restBeds> = {};
@@ -93,6 +119,20 @@ export default function Injection() {
 
   const handleSubmitInject = () => {
     if (!selectedAppointmentId) return;
+
+    if (!selectedBatch) {
+      setErrorMessage("示踪剂批次不存在，请选择有效的批次");
+      return;
+    }
+    if (selectedBatch.tracerType !== injectForm.tracerType) {
+      setErrorMessage("批次与示踪剂类型不匹配，请检查后重新选择");
+      return;
+    }
+    if (!isStockSufficient) {
+      setErrorMessage(`药量不足：当前批次剩余 ${selectedBatch.remainingActivity} MBq，注射需要 ${injectForm.tracerActivity} MBq`);
+      return;
+    }
+
     const success = addInjectionRecord({
       id: `ir_${Date.now()}`,
       appointmentId: selectedAppointmentId,
@@ -188,24 +228,8 @@ export default function Injection() {
                 if (!p) return null;
                 const rec = getInjectionByAppointment(a.id);
                 const hasInjected = !!rec;
-                const canInject = canAdvanceToNode(a.id, "injection");
                 const currentNode = getCurrentFlowNode(a.id);
-                const nodes = getFlowNodesByAppointment(a.id);
-                const bloodDrawNode = nodes.find((n) => n.nodeType === "blood_draw");
-                const checkInNode = nodes.find((n) => n.nodeType === "check_in");
-
-                let disabledReason = "";
-                if (hasInjected) {
-                  disabledReason = "已完成注射";
-                } else if (!canInject) {
-                  if (checkInNode?.status !== "completed") {
-                    disabledReason = "待签到";
-                  } else if (bloodDrawNode?.status !== "completed") {
-                    disabledReason = "待采血";
-                  } else if (currentNode) {
-                    disabledReason = `当前：${flowNodeLabel[currentNode.nodeType]}`;
-                  }
-                }
+                const isInProgress = currentNode?.nodeType === "injection";
 
                 return (
                   <div key={a.id} className="px-5 py-4 hover:bg-slate-50/50 transition-colors">
@@ -224,6 +248,12 @@ export default function Injection() {
                               {patientTagLabel[t]}
                             </span>
                           ))}
+                          {isInProgress && (
+                            <span className="flex items-center gap-1 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-medium">
+                              <Clock className="w-3 h-3 animate-pulse" />
+                              进行中
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
                           <span className="font-mono">{p.patientNo}</span>
@@ -243,34 +273,26 @@ export default function Injection() {
                           </div>
                         )}
                       </div>
-                      <div className="flex flex-col items-end gap-1">
-                        {disabledReason && !hasInjected && (
-                          <span className="text-[10px] text-amber-600 flex items-center gap-0.5">
-                            <Info className="w-3 h-3" />
-                            {disabledReason}
-                          </span>
+                      <button
+                        onClick={() => handleInject(a.id)}
+                        disabled={hasInjected}
+                        className={cn(
+                          "btn-primary shrink-0",
+                          hasInjected && "!bg-slate-200 !text-slate-500 !border-slate-200 cursor-not-allowed"
                         )}
-                        <button
-                          onClick={() => handleInject(a.id)}
-                          disabled={hasInjected || !canInject}
-                          className={cn(
-                            "btn-primary shrink-0",
-                            (hasInjected || !canInject) && "!bg-slate-200 !text-slate-500 !border-slate-200 cursor-not-allowed"
-                          )}
-                        >
-                          {hasInjected ? (
-                            <>
-                              <Check className="w-4 h-4" />
-                              已注射
-                            </>
-                          ) : (
-                            <>
-                              <Syringe className="w-4 h-4" />
-                              注射登记
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      >
+                        {hasInjected ? (
+                          <>
+                            <Check className="w-4 h-4" />
+                            已注射
+                          </>
+                        ) : (
+                          <>
+                            <Syringe className="w-4 h-4" />
+                            注射登记
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 );
@@ -284,14 +306,59 @@ export default function Injection() {
             </div>
           </div>
 
-          <div className="col-span-5 card overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Syringe className="w-4 h-4 text-medical-600" />
-                <h3 className="text-sm font-semibold text-slate-900">今日注射记录</h3>
+          <div className="col-span-5 space-y-5">
+            <div className="card overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Syringe className="w-4 h-4 text-medical-600" />
+                    <h3 className="text-sm font-semibold text-slate-900">示踪剂库存</h3>
+                  </div>
+                  <span className="text-xs text-slate-500">实时更新</span>
+                </div>
+              </div>
+              <div className="p-5 space-y-3">
+                {Object.entries(tracerStats).map(([type, stat]) => {
+                  const ratio = stat.total > 0 ? stat.remaining / stat.total : 0;
+                  const isLow = ratio < 0.3;
+                  return (
+                    <div key={type} className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-slate-900">{type}</span>
+                        <span className={cn(
+                          "text-xs font-semibold font-mono",
+                          isLow ? "text-amber-600" : "text-emerald-600"
+                        )}>
+                          {Math.round(ratio * 100)}% 剩余
+                        </span>
+                      </div>
+                      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            isLow ? "bg-gradient-to-r from-amber-400 to-amber-500" : "bg-gradient-to-r from-emerald-400 to-emerald-500"
+                          )}
+                          style={{ width: `${Math.max(ratio * 100, 2)}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
+                        <span>{stat.batchCount} 个批次</span>
+                        <span className="font-mono">{stat.remaining} / {stat.total} MBq</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto scrollbar-thin">
+
+            <div className="card overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-medical-600" />
+                  <h3 className="text-sm font-semibold text-slate-900">今日注射记录</h3>
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto scrollbar-thin">
               {injectionRecords
                 .slice()
                 .sort((a, b) => b.injectTime.localeCompare(a.injectTime))
@@ -335,6 +402,7 @@ export default function Injection() {
                     </div>
                   );
                 })}
+            </div>
             </div>
           </div>
         </div>
@@ -509,7 +577,21 @@ export default function Injection() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">示踪剂类型</label>
-                  <select value={injectForm.tracerType} onChange={(e) => setInjectForm({ ...injectForm, tracerType: e.target.value })} className="input">
+                  <select
+                    value={injectForm.tracerType}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      const batches = getTracerBatchesByType(newType).filter(
+                        (b) => b.status !== "depleted" && b.status !== "expired"
+                      );
+                      setInjectForm({
+                        ...injectForm,
+                        tracerType: newType,
+                        tracerBatch: batches[0]?.batchNo || "",
+                      });
+                    }}
+                    className="input"
+                  >
                     <option value="18F-FDG">18F-FDG</option>
                     <option value="18F-NaF">18F-NaF</option>
                     <option value="18F-PSMA">18F-PSMA</option>
@@ -517,21 +599,60 @@ export default function Injection() {
                   </select>
                 </div>
                 <div>
-                  <label className="label">示踪剂批次</label>
-                  <select value={injectForm.tracerBatch} onChange={(e) => setInjectForm({ ...injectForm, tracerBatch: e.target.value })} className="input">
-                    <option value="FDG-20260616-A">FDG-20260616-A</option>
-                    <option value="FDG-20260616-B">FDG-20260616-B</option>
-                    <option value="FDG-20260616-C">FDG-20260616-C</option>
+                  <label className="label flex items-center justify-between">
+                    <span>示踪剂批次</span>
+                    {selectedBatch && (
+                      <span className={cn(
+                        "text-[10px] font-medium",
+                        selectedBatch.status === "low_stock" ? "text-amber-600" : "text-emerald-600"
+                      )}>
+                        {selectedBatch.status === "low_stock" ? "库存紧张" : "库存充足"}
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    value={injectForm.tracerBatch}
+                    onChange={(e) => setInjectForm({ ...injectForm, tracerBatch: e.target.value })}
+                    className={cn(
+                      "input",
+                      !isStockSufficient && "border-rose-300 focus:border-rose-500 focus:ring-rose-500"
+                    )}
+                  >
+                    {availableBatches.length === 0 ? (
+                      <option value="">暂无可用批次</option>
+                    ) : (
+                      availableBatches.map((b) => (
+                        <option key={b.id} value={b.batchNo}>
+                          {b.batchNo} (剩余 {b.remainingActivity} MBq)
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
                 <div>
-                  <label className="label">注射活度（MBq）</label>
+                  <label className="label flex items-center justify-between">
+                    <span>注射活度（MBq）</span>
+                    {selectedBatch && (
+                      <span className="text-[10px] text-slate-400">
+                        剩余 {selectedBatch.remainingActivity} MBq
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="number"
                     value={injectForm.tracerActivity}
                     onChange={(e) => setInjectForm({ ...injectForm, tracerActivity: Number(e.target.value) })}
-                    className="input"
+                    className={cn(
+                      "input",
+                      !isStockSufficient && "border-rose-300 focus:border-rose-500 focus:ring-rose-500"
+                    )}
                   />
+                  {!isStockSufficient && selectedBatch && (
+                    <p className="mt-1 text-[10px] text-rose-600 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      药量不足，还差 {injectForm.tracerActivity - selectedBatch.remainingActivity} MBq
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="label">注射人员</label>

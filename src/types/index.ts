@@ -123,6 +123,24 @@ export interface Report {
   urgency: ReportUrgency;
 }
 
+export interface ReportTimeoutRules {
+  normalHours: number;
+  urgentHours: number;
+  warningThreshold: number;
+}
+
+export interface TracerBatch {
+  id: string;
+  tracerType: string;
+  batchNo: string;
+  totalActivity: number;
+  remainingActivity: number;
+  calibrationTime: string;
+  expiryTime: string;
+  status: "available" | "low_stock" | "depleted" | "expired";
+  manufacturer?: string;
+}
+
 export interface RestBed {
   id: string;
   name: string;

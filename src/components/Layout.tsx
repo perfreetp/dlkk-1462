@@ -13,6 +13,7 @@ import {
   User,
   Activity,
   X,
+  Handshake,
 } from "lucide-react";
 import { cn } from "@/utils";
 
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/assessment", label: "到检评估", icon: ClipboardCheck },
   { to: "/injection", label: "注射与候检", icon: Syringe },
   { to: "/report", label: "报告衔接", icon: FileText },
+  { to: "/handover", label: "交接班", icon: Handshake },
   { to: "/statistics", label: "运营统计", icon: BarChart3 },
 ];
 
