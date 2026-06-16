@@ -112,6 +112,21 @@ export default function Injection() {
   }, [restBeds]);
 
   const handleInject = (appointmentId: string) => {
+    const appt = appointments.find((a) => a.id === appointmentId);
+    const tracerType = appt?.examType === "骨扫描" ? "99mTc-MDP" : "18F-FDG";
+    const plannedBatch = appt?.tracerBatch;
+    const availableBatchesByType = getTracerBatchesByType(tracerType).filter(
+      (b) => b.status !== "depleted" && b.status !== "expired"
+    );
+    const availableBatch = availableBatchesByType.sort(
+      (a, b) => new Date(a.expiryTime).getTime() - new Date(b.expiryTime).getTime()
+    )[0];
+
+    setInjectForm((prev) => ({
+      ...prev,
+      tracerType,
+      tracerBatch: plannedBatch || availableBatch?.batchNo || "",
+    }));
     setSelectedAppointmentId(appointmentId);
     setShowInjectModal(true);
     setErrorMessage(null);
@@ -119,6 +134,15 @@ export default function Injection() {
 
   const handleSubmitInject = () => {
     if (!selectedAppointmentId) return;
+
+    const appt = appointments.find((a) => a.id === selectedAppointmentId);
+
+    if (appt?.tracerBatch && appt.tracerBatch !== injectForm.tracerBatch) {
+      setErrorMessage(
+        `批次不匹配：预约计划批次为「${appt.tracerBatch}」，当前选择「${injectForm.tracerBatch}」。如需更换批次，请先回到预约排程页面调整计划批次。`
+      );
+      return;
+    }
 
     if (!selectedBatch) {
       setErrorMessage("示踪剂批次不存在，请选择有效的批次");
@@ -147,12 +171,17 @@ export default function Injection() {
       const currentNode = getCurrentFlowNode(selectedAppointmentId);
       const nodes = getFlowNodesByAppointment(selectedAppointmentId);
       const bloodDrawNode = nodes.find((n) => n.nodeType === "blood_draw");
-      if (bloodDrawNode?.status !== "completed") {
-        setErrorMessage("该患者尚未完成采血环节，请先完成采血后再进行注射登记");
-      } else if (currentNode) {
-        setErrorMessage(`流程异常：当前处于「${flowNodeLabel[currentNode.nodeType]}」环节，未到注射环节`);
+      const apptRetry = appointments.find((a) => a.id === selectedAppointmentId);
+      if (apptRetry?.tracerBatch && apptRetry.tracerBatch !== injectForm.tracerBatch) {
+        setErrorMessage(
+          `批次不匹配：预约计划批次为「${apptRetry.tracerBatch}」，当前选择「${injectForm.tracerBatch}」。如需更换批次，请先回到预约排程页面调整计划批次。`
+        );
+      } else if (bloodDrawNode?.status !== "completed") {
+        setErrorMessage("该患者尚未完成采血环节，请先完成采血后再进行注射登记（从当日看板推进流程）");
+      } else if (currentNode?.nodeType !== "injection" || currentNode.status !== "in_progress") {
+        setErrorMessage("该患者尚未推进到注射环节，请从当日看板点击推进按钮进入注射环节后再登记");
       } else {
-        setErrorMessage("该患者尚未完成签到和采血，无法进行注射登记");
+        setErrorMessage("无法完成注射登记，请核对流程与药物信息");
       }
     }
   };
@@ -574,23 +603,39 @@ export default function Injection() {
                 </div>
               )}
 
+              {(() => {
+                const a = selectedAppointmentId ? appointments.find((x) => x.id === selectedAppointmentId) : null;
+                const planned = a?.tracerBatch;
+                if (!planned) return null;
+                const plannedBatchInfo = tracerBatches.find((b) => b.batchNo === planned);
+                return (
+                  <div className="p-3 rounded-lg bg-sky-50 border border-sky-200 flex items-start gap-2">
+                    <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold text-sky-700">预约计划批次已锁定</div>
+                      <div className="text-xs text-sky-600 mt-0.5">
+                        该患者预约已指定批次 <span className="font-mono font-bold">{planned}</span>，
+                        如需更换请先到「预约排程」调整计划批次。
+                      </div>
+                      {plannedBatchInfo && (
+                        <div className="mt-1.5 text-[10px] text-sky-700 font-mono">
+                          {plannedBatchInfo.tracerType} · 剩余 {plannedBatchInfo.remainingActivity} MBq ·
+                          标定 {formatDateTime(plannedBatchInfo.calibrationTime, "time")}
+                        </div>
+                      )}
+                    </div>
+                    <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">示踪剂类型</label>
                   <select
                     value={injectForm.tracerType}
-                    onChange={(e) => {
-                      const newType = e.target.value;
-                      const batches = getTracerBatchesByType(newType).filter(
-                        (b) => b.status !== "depleted" && b.status !== "expired"
-                      );
-                      setInjectForm({
-                        ...injectForm,
-                        tracerType: newType,
-                        tracerBatch: batches[0]?.batchNo || "",
-                      });
-                    }}
-                    className="input"
+                    disabled
+                    className="input bg-slate-50 text-slate-500 cursor-not-allowed"
                   >
                     <option value="18F-FDG">18F-FDG</option>
                     <option value="18F-NaF">18F-NaF</option>
@@ -612,10 +657,12 @@ export default function Injection() {
                   </label>
                   <select
                     value={injectForm.tracerBatch}
+                    disabled={!!selectedAppointmentId && !!appointments.find((x) => x.id === selectedAppointmentId)?.tracerBatch}
                     onChange={(e) => setInjectForm({ ...injectForm, tracerBatch: e.target.value })}
                     className={cn(
                       "input",
-                      !isStockSufficient && "border-rose-300 focus:border-rose-500 focus:ring-rose-500"
+                      !isStockSufficient && "border-rose-300 focus:border-rose-500 focus:ring-rose-500",
+                      !!selectedAppointmentId && !!appointments.find((x) => x.id === selectedAppointmentId)?.tracerBatch && "bg-slate-50 text-slate-500 cursor-not-allowed"
                     )}
                   >
                     {availableBatches.length === 0 ? (

@@ -59,6 +59,8 @@ export default function Dashboard() {
     getChecklistByAppointment,
     getInjectionByAppointment,
     getReportByAppointment,
+    isReportTimeout,
+    isReportWarning,
     advanceFlow,
   } = useAppStore();
 
@@ -94,14 +96,22 @@ export default function Dashboard() {
 
   const stats = useMemo(() => {
     const t = todaysAppointments;
+    let reportTimeout = 0;
+    let reportWarning = 0;
+    t.forEach((a) => {
+      if (isReportTimeout(a.id)) reportTimeout++;
+      else if (isReportWarning(a.id)) reportWarning++;
+    });
     return {
       total: t.length,
       checkedIn: t.filter((a) => a.status === "checked_in" || a.status === "in_progress").length,
       inProgress: t.filter((a) => a.status === "in_progress").length,
       completed: t.filter((a) => a.status === "completed").length,
       pending: t.filter((a) => a.status === "pending").length,
+      reportTimeout,
+      reportWarning,
     };
-  }, [todaysAppointments]);
+  }, [todaysAppointments, isReportTimeout, isReportWarning]);
 
   const alerts = useMemo(() => {
     const list: { id: string; type: "warn" | "error"; message: string; patientName: string }[] = [];
@@ -135,9 +145,24 @@ export default function Dashboard() {
           }
         }
       });
+      if (isReportTimeout(a.id)) {
+        list.push({
+          id: `alert_${a.id}_report_timeout`,
+          type: "error",
+          patientName: p.name,
+          message: "报告已超时，请医师尽快完成",
+        });
+      } else if (isReportWarning(a.id)) {
+        list.push({
+          id: `alert_${a.id}_report_warn`,
+          type: "warn",
+          patientName: p.name,
+          message: "报告即将超时，请抓紧处理",
+        });
+      }
     });
     return list;
-  }, [todaysAppointments, getPatientById, getFlowNodesByAppointment]);
+  }, [todaysAppointments, getPatientById, getFlowNodesByAppointment, isReportTimeout, isReportWarning]);
 
   const handleAdvance = (appointmentId: string, skipRescan = true) => {
     advanceFlow(appointmentId, { skipRescan });
@@ -237,13 +262,15 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         {[
-          { label: "今日预约", value: stats.total, icon: Users, color: "medical" },
-          { label: "待签到", value: stats.pending, icon: Clock, color: "slate" },
-          { label: "进行中", value: stats.inProgress, icon: Play, color: "amber" },
-          { label: "已完成", value: stats.completed, icon: CheckCircle2, color: "emerald" },
-          { label: "预警数", value: alerts.length, icon: AlertTriangle, color: alerts.length > 0 ? "rose" : "slate" },
+          { label: "今日预约", value: stats.total, icon: Users, color: "medical", sub: "" },
+          { label: "待签到", value: stats.pending, icon: Clock, color: "slate", sub: "" },
+          { label: "进行中", value: stats.inProgress, icon: Play, color: "amber", sub: "" },
+          { label: "已完成", value: stats.completed, icon: CheckCircle2, color: "emerald", sub: "" },
+          { label: "报告超时", value: stats.reportTimeout, icon: Clock, color: stats.reportTimeout > 0 ? "rose" : "slate", sub: "超时限未出报告" },
+          { label: "风险预警", value: stats.reportWarning, icon: AlertTriangle, color: stats.reportWarning > 0 ? "amber" : "slate", sub: "即将到时限" },
+          { label: "节点异常", value: alerts.length - stats.reportTimeout - stats.reportWarning, icon: AlertTriangle, color: (alerts.length - stats.reportTimeout - stats.reportWarning) > 0 ? "rose" : "slate", sub: "流程节点异常" },
         ].map((s) => {
           const Icon = s.icon;
           const colorMap: Record<string, string> = {
@@ -266,6 +293,7 @@ export default function Dashboard() {
                 <div>
                   <div className={cn("text-xs font-medium", bgMap[s.color].split(" ")[1])}>{s.label}</div>
                   <div className="mt-1.5 text-3xl font-bold font-mono text-slate-900">{s.value}</div>
+                  {s.sub && <div className="mt-0.5 text-[10px] text-slate-400">{s.sub}</div>}
                 </div>
                 <div className={cn("w-10 h-10 rounded-lg bg-gradient-to-br flex items-center justify-center", colorMap[s.color])}>
                   <Icon className="w-5 h-5" />

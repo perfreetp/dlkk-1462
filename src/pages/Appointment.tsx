@@ -21,6 +21,8 @@ import {
   XCircle,
   Info,
   Clipboard,
+  Syringe,
+  Save,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import {
@@ -45,12 +47,15 @@ export default function Appointment() {
     appointments,
     patients,
     currentDate,
+    tracerBatches,
     getPatientById,
     getAppointmentById,
     getChecklistByAppointment,
     cancelAppointment,
     rescheduleAppointment,
     addAppointment,
+    updateAppointment,
+    getTracerBatchesByType,
   } = useAppStore();
 
   const [selectedDate, setSelectedDate] = useState(currentDate);
@@ -782,6 +787,59 @@ export default function Appointment() {
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-500">申请医师</span>
                       <span className="text-slate-900">{p.doctor}</span>
+                    </div>
+                    <div className="divider" />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm text-slate-500 flex items-center gap-1">
+                          <Syringe className="w-3.5 h-3.5" />
+                          计划示踪剂批次
+                        </label>
+                        {a.tracerBatch ? (
+                          <span className="text-xs text-medical-600 font-medium">已设定</span>
+                        ) : (
+                          <span className="text-xs text-slate-400">未设定</span>
+                        )}
+                      </div>
+                      <select
+                        value={a.tracerBatch || ""}
+                        onChange={(e) => updateAppointment(a.id, { tracerBatch: e.target.value || undefined })}
+                        className="input text-sm py-1.5"
+                      >
+                        <option value="">-- 请选择批次 --</option>
+                        {(() => {
+                          const tracerType = a.examType === "骨扫描" ? "99mTc-MDP" : "18F-FDG";
+                          const batches = getTracerBatchesByType(tracerType).filter(
+                            (b) => b.status !== "depleted" && b.status !== "expired"
+                          );
+                          return batches.length === 0 ? (
+                            <option value="" disabled>（该类型暂无可选批次）</option>
+                          ) : (
+                            batches.map((b) => (
+                              <option key={b.id} value={b.batchNo}>
+                                {b.batchNo} ({tracerType} · 剩余 {b.remainingActivity} MBq)
+                              </option>
+                            ))
+                          );
+                        })()}
+                      </select>
+                      {a.tracerBatch && (() => {
+                        const b = tracerBatches.find((x) => x.batchNo === a.tracerBatch);
+                        if (!b) return null;
+                        return (
+                          <div className="p-2 rounded-lg bg-sky-50 text-[10px] text-sky-700 flex items-start gap-1.5">
+                            <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-semibold">批次信息：</span>
+                              {b.manufacturer} · 标定 {formatDateTime(b.calibrationTime, "time")} ·
+                              失效 {formatDateTime(b.expiryTime, "time")} ·
+                              <span className={cn("font-semibold", b.status === "low_stock" ? "text-amber-600" : "text-emerald-600")}>
+                                {" "}剩余 {b.remainingActivity}/{b.totalActivity} MBq
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

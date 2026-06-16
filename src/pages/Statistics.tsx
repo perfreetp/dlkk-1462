@@ -10,6 +10,9 @@ import {
   Target,
   ChevronDown,
   CalendarDays,
+  FileText,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import {
@@ -41,7 +44,7 @@ type HeatmapRow = {
 };
 
 export default function Statistics() {
-  const { statistics, appointments, currentDate } = useAppStore();
+  const { statistics, appointments, currentDate, isReportTimeout, isReportWarning, reports, getAppointmentById } = useAppStore();
   const [period, setPeriod] = useState<"week" | "month" | "quarter">("month");
 
   const noShowCount = useMemo(
@@ -52,6 +55,25 @@ export default function Statistics() {
     () => appointments.filter((a) => a.date === currentDate).length,
     [appointments, currentDate]
   );
+
+  const reportKpis = useMemo(() => {
+    let reportTimeoutCount = 0;
+    let reportWarningCount = 0;
+    let reportOnTime = 0;
+    let totalReports = 0;
+    appointments.forEach((a) => {
+      const hasReport = reports.some((r) => r.appointmentId === a.id);
+      if (hasReport) {
+        totalReports++;
+        if (isReportTimeout(a.id)) reportTimeoutCount++;
+        else if (isReportWarning(a.id)) reportWarningCount++;
+        else reportOnTime++;
+      }
+    });
+    const onTimeRate = totalReports > 0 ? Math.round((reportOnTime / totalReports) * 100) : 0;
+    const timeoutRate = totalReports > 0 ? Math.round((reportTimeoutCount / totalReports) * 100) : 0;
+    return { reportTimeoutCount, reportWarningCount, reportOnTime, totalReports, onTimeRate, timeoutRate };
+  }, [appointments, reports, isReportTimeout, isReportWarning]);
 
   const heatmapData = useMemo<HeatmapRow[]>(() => {
     const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -66,6 +88,14 @@ export default function Statistics() {
       ),
     }));
   }, []);
+
+  const reportStatusDistribution = useMemo(() => {
+    return [
+      { name: "按时完成", value: reportKpis.reportOnTime },
+      { name: "临近时限", value: reportKpis.reportWarningCount },
+      { name: "超时未出", value: reportKpis.reportTimeoutCount },
+    ];
+  }, [reportKpis]);
 
   const kpiCards = [
     {
@@ -103,6 +133,24 @@ export default function Statistics() {
       icon: Calendar,
       color: "emerald",
       detail: `日均约 ${Math.round(statistics.weeklyExams / 7)} 例`,
+    },
+    {
+      label: "报告按时率",
+      value: `${reportKpis.onTimeRate}%`,
+      trend: 2.1,
+      trendLabel: "较上周",
+      icon: CheckCircle2,
+      color: "emerald",
+      detail: `按时 ${reportKpis.reportOnTime}/${reportKpis.totalReports} 份`,
+    },
+    {
+      label: "报告超时率",
+      value: `${reportKpis.timeoutRate}%`,
+      trend: -0.8,
+      trendLabel: "较上周",
+      icon: AlertTriangle,
+      color: "rose",
+      detail: `超时 ${reportKpis.reportTimeoutCount} 份，风险 ${reportKpis.reportWarningCount} 份`,
     },
   ];
 
@@ -144,7 +192,7 @@ export default function Statistics() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         {kpiCards.map((k) => {
           const Icon = k.icon;
           const TrendIcon = getTrendIcon(k.trend, k.color === "rose" || k.color === "amber");

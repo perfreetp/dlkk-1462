@@ -17,6 +17,9 @@ import type {
   ChecklistSource,
   ReportTimeoutRules,
   TracerBatch,
+  HandoverRecord,
+  ShiftType,
+  HandoverTodoItem,
 } from "@/types";
 import { patients as mockPatients } from "@/mock/patients";
 import { appointments as mockAppointments } from "@/mock/appointments";
@@ -54,6 +57,7 @@ interface AppState {
   currentDate: string;
   reportTimeoutRules: ReportTimeoutRules;
   tracerBatches: TracerBatch[];
+  handoverRecords: HandoverRecord[];
 
   getPatientById: (id: string) => Patient | undefined;
   getAppointmentsByDate: (date: string) => Appointment[];
@@ -64,8 +68,10 @@ interface AppState {
   getReportByAppointment: (appointmentId: string) => Report | undefined;
   canAdvanceToNode: (appointmentId: string, nodeType: FlowNodeType) => boolean;
   getCurrentFlowNode: (appointmentId: string) => FlowNode | undefined;
+  getEffectiveCurrentNode: (appointmentId: string) => { node: FlowNode; phase: "in_progress" | "pending_next" | "all_done" } | null;
 
   updateAppointmentStatus: (id: string, status: AppointmentStatus) => void;
+  updateAppointment: (id: string, updates: Partial<Appointment>) => void;
   updateFlowNodeStatus: (id: string, status: NodeStatus, startTime?: string, endTime?: string) => void;
   updateReportStatus: (id: string, status: ReportStatus) => void;
   addChecklist: (checklist: Omit<Checklist, "id" | "createdAt">) => void;
@@ -91,6 +97,14 @@ interface AppState {
 
   advanceFlow: (appointmentId: string, options?: { skipRescan?: boolean }) => boolean;
   skipFlowNode: (appointmentId: string, nodeType: FlowNodeType) => void;
+  createHandoverRecord: (params: {
+    fromShift: ShiftType;
+    toShift: ShiftType;
+    fromOperator: string;
+    toOperator: string;
+    note: string;
+    items: HandoverTodoItem[];
+  }) => HandoverRecord;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -110,6 +124,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     warningThreshold: 0.8,
   },
   tracerBatches: mockTracerBatches,
+  handoverRecords: [],
 
   getPatientById: (id) => get().patients.find((p) => p.id === id),
   getAppointmentsByDate: (date) => get().appointments.filter((a) => a.date === date),
@@ -128,6 +143,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       .getFlowNodesByAppointment(appointmentId)
       .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
     return nodes.find((n) => n.status === "in_progress");
+  },
+
+  getEffectiveCurrentNode: (appointmentId) => {
+    const nodes = get()
+      .getFlowNodesByAppointment(appointmentId)
+      .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+    if (nodes.length === 0) return null;
+
+    const inProgress = nodes.find((n) => n.status === "in_progress");
+    if (inProgress) {
+      return { node: inProgress, phase: "in_progress" as const };
+    }
+
+    const lastCompletedIdx = [...nodes].reverse().findIndex((n) => n.status === "completed");
+    if (lastCompletedIdx === -1) {
+      const firstPending = nodes.find((n) => n.status === "pending");
+      if (!firstPending) return { node: nodes[nodes.length - 1], phase: "all_done" as const };
+      return { node: firstPending, phase: "pending_next" as const };
+    }
+    const realIdx = nodes.length - 1 - lastCompletedIdx;
+    if (realIdx >= nodes.length - 1) {
+      return { node: nodes[nodes.length - 1], phase: "all_done" as const };
+    }
+    return { node: nodes[realIdx + 1], phase: "pending_next" as const };
   },
 
   canAdvanceToNode: (appointmentId, nodeType) => {
@@ -150,6 +189,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateAppointmentStatus: (id, status) =>
     set((state) => ({
       appointments: state.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
+    })),
+
+  updateAppointment: (id, updates) =>
+    set((state) => ({
+      appointments: state.appointments.map((a) => (a.id === id ? { ...a, ...updates } : a)),
     })),
 
   updateFlowNodeStatus: (id, status, startTime, endTime) =>
@@ -203,8 +247,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const injectionNode = nodes.find((n) => n.nodeType === "injection");
     if (!injectionNode) return false;
     if (injectionNode.status === "completed") return false;
-    if (injectionNode.status === "in_progress") return true;
-    return get().canAdvanceToNode(appointmentId, "injection");
+    const bloodDrawNode = nodes.find((n) => n.nodeType === "blood_draw");
+    if (!bloodDrawNode || bloodDrawNode.status !== "completed") return false;
+    return injectionNode.status === "in_progress";
   },
 
   getTracerBatchesByType: (tracerType) =>
@@ -278,6 +323,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const canInject = get().canPerformInjection(record.appointmentId);
     if (!canInject) {
       console.warn("流程异常：未到注射环节，无法登记注射");
+      return false;
+    }
+
+    const appt = get().appointments.find((a) => a.id === record.appointmentId);
+    if (appt?.tracerBatch && appt.tracerBatch !== record.tracerBatch) {
+      console.warn("药物异常：注射批次与预约计划批次不匹配");
       return false;
     }
 
@@ -522,5 +573,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       };
     });
+  },
+
+  createHandoverRecord: (params) => {
+    const record: HandoverRecord = {
+      id: `ho_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      ...params,
+    };
+    set((state) => ({
+      handoverRecords: [record, ...state.handoverRecords],
+    }));
+    return record;
   },
 }));

@@ -141,6 +141,29 @@ export interface TracerBatch {
   manufacturer?: string;
 }
 
+export type ShiftType = "morning" | "afternoon" | "evening";
+
+export interface HandoverTodoItem {
+  appointmentId: string;
+  patientName: string;
+  currentNode: FlowNodeType;
+  nextNode?: FlowNodeType;
+  actions: string[];
+  hasAbnormal: boolean;
+  abnormalNote?: string;
+}
+
+export interface HandoverRecord {
+  id: string;
+  fromShift: ShiftType;
+  toShift: ShiftType;
+  fromOperator: string;
+  toOperator: string;
+  note: string;
+  createdAt: string;
+  items: HandoverTodoItem[];
+}
+
 export interface RestBed {
   id: string;
   name: string;
