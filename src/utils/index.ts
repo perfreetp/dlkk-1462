@@ -7,6 +7,7 @@ import type {
   ReportStatus,
   ReportUrgency,
   DeviceStatus,
+  ChecklistSource,
 } from "@/types";
 
 export const cn = (...classes: (string | false | undefined)[]): string =>
@@ -164,3 +165,13 @@ export const examTypes = [
   { type: "骨扫描", subtypes: ["全身骨显像", "局部骨显像", "三相骨显像"] },
   { type: "SPECT", subtypes: ["甲状腺显像", "肾动态显像", "心肌灌注显像", "肺灌注显像"] },
 ];
+
+export const checklistSourceLabel: Record<ChecklistSource, string> = {
+  appointment: "预约时录入",
+  assessment: "到检时评估",
+};
+
+export const checklistSourceBadgeClass: Record<ChecklistSource, string> = {
+  appointment: "bg-sky-50 text-sky-700 border border-sky-100",
+  assessment: "bg-emerald-50 text-emerald-700 border border-emerald-100",
+};

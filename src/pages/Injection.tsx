@@ -13,10 +13,12 @@ import {
   Save,
   AlertCircle,
   CheckCircle2,
+  Info,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import {
   cn,
+  flowNodeLabel,
   patientTypeLabel,
   patientTypeBadgeClass,
   patientTagLabel,
@@ -35,10 +37,14 @@ export default function Injection() {
     getPatientById,
     getInjectionByAppointment,
     getFlowNodesByAppointment,
+    getCurrentFlowNode,
+    canAdvanceToNode,
     addInjectionRecord,
     occupyBed,
     releaseBed,
   } = useAppStore();
+
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<"inject" | "rest">("inject");
   const [showInjectModal, setShowInjectModal] = useState(false);
@@ -82,18 +88,33 @@ export default function Injection() {
   const handleInject = (appointmentId: string) => {
     setSelectedAppointmentId(appointmentId);
     setShowInjectModal(true);
+    setErrorMessage(null);
   };
 
   const handleSubmitInject = () => {
     if (!selectedAppointmentId) return;
-    addInjectionRecord({
+    const success = addInjectionRecord({
       id: `ir_${Date.now()}`,
       appointmentId: selectedAppointmentId,
       ...injectForm,
       injectTime: new Date().toISOString(),
     });
-    setShowInjectModal(false);
-    setSelectedAppointmentId(null);
+    if (success) {
+      setShowInjectModal(false);
+      setSelectedAppointmentId(null);
+      setErrorMessage(null);
+    } else {
+      const currentNode = getCurrentFlowNode(selectedAppointmentId);
+      const nodes = getFlowNodesByAppointment(selectedAppointmentId);
+      const bloodDrawNode = nodes.find((n) => n.nodeType === "blood_draw");
+      if (bloodDrawNode?.status !== "completed") {
+        setErrorMessage("该患者尚未完成采血环节，请先完成采血后再进行注射登记");
+      } else if (currentNode) {
+        setErrorMessage(`流程异常：当前处于「${flowNodeLabel[currentNode.nodeType]}」环节，未到注射环节`);
+      } else {
+        setErrorMessage("该患者尚未完成签到和采血，无法进行注射登记");
+      }
+    }
   };
 
   const bedStats = useMemo(() => ({
@@ -167,6 +188,25 @@ export default function Injection() {
                 if (!p) return null;
                 const rec = getInjectionByAppointment(a.id);
                 const hasInjected = !!rec;
+                const canInject = canAdvanceToNode(a.id, "injection");
+                const currentNode = getCurrentFlowNode(a.id);
+                const nodes = getFlowNodesByAppointment(a.id);
+                const bloodDrawNode = nodes.find((n) => n.nodeType === "blood_draw");
+                const checkInNode = nodes.find((n) => n.nodeType === "check_in");
+
+                let disabledReason = "";
+                if (hasInjected) {
+                  disabledReason = "已完成注射";
+                } else if (!canInject) {
+                  if (checkInNode?.status !== "completed") {
+                    disabledReason = "待签到";
+                  } else if (bloodDrawNode?.status !== "completed") {
+                    disabledReason = "待采血";
+                  } else if (currentNode) {
+                    disabledReason = `当前：${flowNodeLabel[currentNode.nodeType]}`;
+                  }
+                }
+
                 return (
                   <div key={a.id} className="px-5 py-4 hover:bg-slate-50/50 transition-colors">
                     <div className="flex items-center gap-4">
@@ -203,26 +243,34 @@ export default function Injection() {
                           </div>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleInject(a.id)}
-                        disabled={hasInjected}
-                        className={cn(
-                          "btn-primary shrink-0",
-                          hasInjected && "!bg-slate-200 !text-slate-500 !border-slate-200 cursor-not-allowed"
+                      <div className="flex flex-col items-end gap-1">
+                        {disabledReason && !hasInjected && (
+                          <span className="text-[10px] text-amber-600 flex items-center gap-0.5">
+                            <Info className="w-3 h-3" />
+                            {disabledReason}
+                          </span>
                         )}
-                      >
-                        {hasInjected ? (
-                          <>
-                            <Check className="w-4 h-4" />
-                            已注射
-                          </>
-                        ) : (
-                          <>
-                            <Syringe className="w-4 h-4" />
-                            注射登记
-                          </>
-                        )}
-                      </button>
+                        <button
+                          onClick={() => handleInject(a.id)}
+                          disabled={hasInjected || !canInject}
+                          className={cn(
+                            "btn-primary shrink-0",
+                            (hasInjected || !canInject) && "!bg-slate-200 !text-slate-500 !border-slate-200 cursor-not-allowed"
+                          )}
+                        >
+                          {hasInjected ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              已注射
+                            </>
+                          ) : (
+                            <>
+                              <Syringe className="w-4 h-4" />
+                              注射登记
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -447,6 +495,16 @@ export default function Injection() {
                   ) : null;
                 })()}
               </div>
+
+              {errorMessage && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-semibold text-rose-700">流程校验失败</div>
+                    <div className="text-xs text-rose-600 mt-0.5">{errorMessage}</div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

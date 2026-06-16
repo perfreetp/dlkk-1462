@@ -14,6 +14,7 @@ import type {
   ReportStatus,
   FlowNodeType,
   ReportUrgency,
+  ChecklistSource,
 } from "@/types";
 import { patients as mockPatients } from "@/mock/patients";
 import { appointments as mockAppointments } from "@/mock/appointments";
@@ -56,24 +57,26 @@ interface AppState {
   getChecklistByAppointment: (appointmentId: string) => Checklist | undefined;
   getInjectionByAppointment: (appointmentId: string) => InjectionRecord | undefined;
   getReportByAppointment: (appointmentId: string) => Report | undefined;
+  canAdvanceToNode: (appointmentId: string, nodeType: FlowNodeType) => boolean;
+  getCurrentFlowNode: (appointmentId: string) => FlowNode | undefined;
 
   updateAppointmentStatus: (id: string, status: AppointmentStatus) => void;
   updateFlowNodeStatus: (id: string, status: NodeStatus, startTime?: string, endTime?: string) => void;
   updateReportStatus: (id: string, status: ReportStatus) => void;
-  addChecklist: (checklist: Checklist) => void;
-  updateChecklist: (appointmentId: string, checklist: Partial<Checklist>) => void;
-  addInjectionRecord: (record: InjectionRecord) => void;
+  addChecklist: (checklist: Omit<Checklist, "id" | "createdAt">) => void;
+  updateChecklist: (appointmentId: string, checklist: Partial<Checklist>, source?: ChecklistSource) => void;
+  addInjectionRecord: (record: InjectionRecord) => boolean;
   addAppointment: (
     appointment: Appointment,
     patient: Patient,
-    checklistData?: Omit<Checklist, "id" | "appointmentId" | "passed">
+    checklistData?: Omit<Checklist, "id" | "appointmentId" | "passed" | "source" | "createdAt">
   ) => void;
   cancelAppointment: (id: string) => void;
   rescheduleAppointment: (id: string, date: string, timeSlot: string) => void;
   occupyBed: (bedId: string, appointmentId: string) => void;
   releaseBed: (bedId: string) => void;
 
-  advanceFlow: (appointmentId: string, options?: { skipRescan?: boolean }) => void;
+  advanceFlow: (appointmentId: string, options?: { skipRescan?: boolean }) => boolean;
   skipFlowNode: (appointmentId: string, nodeType: FlowNodeType) => void;
 }
 
@@ -101,6 +104,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   getReportByAppointment: (appointmentId) =>
     get().reports.find((r) => r.appointmentId === appointmentId),
 
+  getCurrentFlowNode: (appointmentId) => {
+    const nodes = get()
+      .getFlowNodesByAppointment(appointmentId)
+      .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+    return nodes.find((n) => n.status === "in_progress");
+  },
+
+  canAdvanceToNode: (appointmentId, nodeType) => {
+    const nodes = get()
+      .getFlowNodesByAppointment(appointmentId)
+      .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+    const targetIdx = FLOW_NODE_ORDER.indexOf(nodeType);
+    const currentIdx = nodes.findIndex((n) => n.status === "in_progress");
+    const firstPendingIdx = nodes.findIndex((n) => n.status === "pending");
+    if (currentIdx === -1) {
+      return firstPendingIdx === targetIdx;
+    }
+    let nextIdx = currentIdx + 1;
+    while (nextIdx < nodes.length && nodes[nextIdx].status === "skipped") {
+      nextIdx++;
+    }
+    return nextIdx === targetIdx;
+  },
+
   updateAppointmentStatus: (id, status) =>
     set((state) => ({
       appointments: state.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
@@ -119,22 +146,43 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
 
   addChecklist: (checklist) =>
-    set((state) => ({ checklists: [...state.checklists, checklist] })),
+    set((state) => {
+      const now = new Date().toISOString();
+      const newChecklist: Checklist = {
+        ...checklist,
+        id: `cl_${Date.now()}`,
+        createdAt: now,
+      };
+      return { checklists: [...state.checklists, newChecklist] };
+    }),
 
-  updateChecklist: (appointmentId, checklistUpdate) =>
+  updateChecklist: (appointmentId, checklistUpdate, source) =>
     set((state) => {
       const existing = state.checklists.find((c) => c.appointmentId === appointmentId);
       if (existing) {
+        const now = new Date().toISOString();
         return {
           checklists: state.checklists.map((c) =>
-            c.appointmentId === appointmentId ? { ...c, ...checklistUpdate } : c
+            c.appointmentId === appointmentId
+              ? {
+                  ...c,
+                  ...checklistUpdate,
+                  source: source ?? c.source,
+                  updatedAt: now,
+                }
+              : c
           ),
         };
       }
       return state;
     }),
 
-  addInjectionRecord: (record) =>
+  addInjectionRecord: (record) => {
+    const canInject = get().canAdvanceToNode(record.appointmentId, "injection");
+    if (!canInject) {
+      console.warn("流程异常：未到注射环节，无法登记注射");
+      return false;
+    }
     set((state) => {
       const nodes = state.flowNodes.filter((n) => n.appointmentId === record.appointmentId);
       const injectionNode = nodes.find((n) => n.nodeType === "injection");
@@ -145,7 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (injectionNode) {
         updatedFlowNodes = updatedFlowNodes.map((n) =>
           n.id === injectionNode.id
-            ? { ...n, status: "completed" as NodeStatus, startTime: now, endTime: now }
+            ? { ...n, status: "completed" as NodeStatus, startTime: now, endTime: now, operator: record.injector }
             : n
         );
       }
@@ -168,7 +216,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         flowNodes: updatedFlowNodes,
         appointments: updatedAppointments,
       };
-    }),
+    });
+    return true;
+  },
 
   addAppointment: (appointment, patient, checklistData) =>
     set((state) => {
@@ -189,6 +239,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       let newChecklists = state.checklists;
       if (checklistData) {
+        const now = new Date().toISOString();
         const passed =
           !checklistData.isPregnant &&
           checklistData.bloodGlucose <= 11 &&
@@ -200,6 +251,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             appointmentId: appointment.id,
             ...checklistData,
             passed,
+            source: "appointment" as ChecklistSource,
+            createdAt: now,
           },
         ];
       }
@@ -245,38 +298,44 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   advanceFlow: (appointmentId, options = {}) => {
     const { skipRescan = true } = options;
+    const currentNode = get().getCurrentFlowNode(appointmentId);
+    const nodes = get()
+      .getFlowNodesByAppointment(appointmentId)
+      .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
+
+    if (nodes.length === 0) return false;
+
+    const currentIdx = nodes.findIndex((n) => n.status === "in_progress");
+    const pendingIdx = nodes.findIndex((n) => n.status === "pending");
+
+    if (currentIdx === -1 && pendingIdx === -1) {
+      console.warn("流程异常：无可推进的节点");
+      return false;
+    }
+
+    let targetCurrentIdx = currentIdx;
+    let targetNextIdx = pendingIdx;
+
+    if (currentIdx === -1 && pendingIdx !== -1) {
+      targetNextIdx = pendingIdx;
+    } else if (currentIdx !== -1) {
+      targetCurrentIdx = currentIdx;
+      targetNextIdx = currentIdx + 1;
+    }
+
+    if (skipRescan && targetNextIdx < nodes.length && nodes[targetNextIdx].nodeType === "rescan") {
+      nodes[targetNextIdx].status = "skipped";
+      targetNextIdx++;
+    }
+
+    while (
+      targetNextIdx < nodes.length &&
+      nodes[targetNextIdx].status === "skipped"
+    ) {
+      targetNextIdx++;
+    }
+
     set((state) => {
-      const nodes = state.flowNodes
-        .filter((n) => n.appointmentId === appointmentId)
-        .sort((a, b) => FLOW_NODE_ORDER.indexOf(a.nodeType) - FLOW_NODE_ORDER.indexOf(b.nodeType));
-
-      if (nodes.length === 0) return state;
-
-      const currentIdx = nodes.findIndex((n) => n.status === "in_progress");
-      const pendingIdx = nodes.findIndex((n) => n.status === "pending");
-
-      let targetCurrentIdx = currentIdx;
-      let targetNextIdx = pendingIdx;
-
-      if (currentIdx === -1 && pendingIdx !== -1) {
-        targetNextIdx = pendingIdx;
-      } else if (currentIdx !== -1) {
-        targetCurrentIdx = currentIdx;
-        targetNextIdx = currentIdx + 1;
-      }
-
-      if (skipRescan && targetNextIdx < nodes.length && nodes[targetNextIdx].nodeType === "rescan") {
-        nodes[targetNextIdx].status = "skipped";
-        targetNextIdx++;
-      }
-
-      while (
-        targetNextIdx < nodes.length &&
-        nodes[targetNextIdx].status === "skipped"
-      ) {
-        targetNextIdx++;
-      }
-
       const now = new Date().toISOString();
       let updatedNodes = [...state.flowNodes];
 
@@ -325,6 +384,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         reports: updatedReports,
       };
     });
+    return true;
   },
 
   skipFlowNode: (appointmentId, nodeType) => {

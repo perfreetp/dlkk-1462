@@ -23,6 +23,8 @@ import {
   patientTypeBadgeClass,
   patientTagLabel,
   patientTagBadgeClass,
+  checklistSourceLabel,
+  checklistSourceBadgeClass,
   formatDateTime,
 } from "@/utils";
 
@@ -105,13 +107,13 @@ export default function Assessment() {
     if (!selectedAppointment) return;
     const passed = validateChecklist();
     if (existingChecklist) {
-      updateChecklist(selectedAppointment.id, { ...checklist, passed });
+      updateChecklist(selectedAppointment.id, { ...checklist, passed }, "assessment");
     } else {
       addChecklist({
-        id: `cl_${Date.now()}`,
         appointmentId: selectedAppointment.id,
         ...checklist,
         passed,
+        source: "assessment",
       });
     }
     if (passed) {
@@ -205,14 +207,19 @@ export default function Assessment() {
                         {patientTypeLabel[p.patientType]}
                       </span>
                       {cl && (
-                        <span className={cn(
-                          "badge text-[10px] border",
-                          cl.passed
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-rose-50 text-rose-700 border-rose-200"
-                        )}>
-                          {cl.passed ? "评估通过" : "评估不通过"}
-                        </span>
+                        <>
+                          <span className={cn(
+                            "badge text-[10px] border",
+                            cl.passed
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-rose-50 text-rose-700 border-rose-200"
+                          )}>
+                            {cl.passed ? "评估通过" : "评估不通过"}
+                          </span>
+                          <span className={cn("badge text-[10px] border", checklistSourceBadgeClass[cl.source])}>
+                            {checklistSourceLabel[cl.source]}
+                          </span>
+                        </>
                       )}
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
@@ -322,20 +329,39 @@ export default function Assessment() {
 
             <div className="flex-1 overflow-y-auto scrollbar-thin p-6 space-y-5">
               {existingChecklist && (
-                <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div className="text-sm text-emerald-800">
-                    该患者已于 {formatDateTime(existingChecklist.notes ? undefined : undefined)} 完成前置核查
-                    {existingChecklist.notes && `，备注：${existingChecklist.notes}`}
+                <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 text-sm text-emerald-800">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>该患者已完成前置核查</span>
+                      <span className={cn("badge text-[10px] border", checklistSourceBadgeClass[existingChecklist.source])}>
+                        {checklistSourceLabel[existingChecklist.source]}
+                      </span>
+                      {existingChecklist.updatedAt && (
+                        <span className="text-xs text-emerald-600">
+                          最后更新：{formatDateTime(existingChecklist.updatedAt)}
+                        </span>
+                      )}
+                    </div>
+                    {existingChecklist.notes && (
+                      <div className="mt-1 text-xs text-emerald-700">备注：{existingChecklist.notes}</div>
+                    )}
                   </div>
                 </div>
               )}
 
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                  <ClipboardCheck className="w-4 h-4 text-medical-600" />
-                  前置核查清单
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <ClipboardCheck className="w-4 h-4 text-medical-600" />
+                    前置核查清单
+                  </h3>
+                  {existingChecklist && (
+                    <div className="text-xs text-slate-500">
+                      创建时间：{formatDateTime(existingChecklist.createdAt)}
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-5">
                   <div className="space-y-1.5">
                     <label className="label flex items-center justify-between">

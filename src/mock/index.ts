@@ -54,6 +54,9 @@ export const checklists: Checklist[] = [
     allergies: "青霉素过敏",
     notes: "糖尿病患者，血糖控制良好",
     passed: true,
+    source: "appointment",
+    createdAt: "2026-06-15T10:30:00Z",
+    updatedAt: "2026-06-16T07:55:00Z",
   },
   {
     id: "cl2",
@@ -66,6 +69,8 @@ export const checklists: Checklist[] = [
     allergies: "无",
     notes: "住院患者，状态良好",
     passed: true,
+    source: "assessment",
+    createdAt: "2026-06-16T08:20:00Z",
   },
   {
     id: "cl3",
@@ -78,6 +83,8 @@ export const checklists: Checklist[] = [
     allergies: "无",
     notes: "儿童患者，需家长陪同",
     passed: true,
+    source: "appointment",
+    createdAt: "2026-06-15T14:20:00Z",
   },
 ];
 

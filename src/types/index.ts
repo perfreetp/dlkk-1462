@@ -62,6 +62,8 @@ export interface Appointment {
   reminderSent?: boolean;
 }
 
+export type ChecklistSource = "appointment" | "assessment";
+
 export interface Checklist {
   id: string;
   appointmentId: string;
@@ -73,6 +75,9 @@ export interface Checklist {
   allergies: string;
   notes: string;
   passed: boolean;
+  source: ChecklistSource;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface FlowNode {
