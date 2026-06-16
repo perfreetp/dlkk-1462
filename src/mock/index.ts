@@ -1,0 +1,183 @@
+import type {
+  FlowNode,
+  Checklist,
+  InjectionRecord,
+  Device,
+  Report,
+  RestBed,
+  StatisticsData,
+} from "@/types";
+
+export const flowNodes: FlowNode[] = [
+  { id: "fn1", appointmentId: "a1", nodeType: "check_in", startTime: "2026-06-16T07:55:00Z", endTime: "2026-06-16T07:58:00Z", operator: "李护士", status: "completed" },
+  { id: "fn2", appointmentId: "a1", nodeType: "blood_draw", startTime: "2026-06-16T08:00:00Z", endTime: "2026-06-16T08:05:00Z", operator: "王护士", status: "completed" },
+  { id: "fn3", appointmentId: "a1", nodeType: "injection", startTime: "2026-06-16T08:10:00Z", endTime: "2026-06-16T08:12:00Z", operator: "张技师", status: "completed" },
+  { id: "fn4", appointmentId: "a1", nodeType: "rest", startTime: "2026-06-16T08:12:00Z", endTime: "2026-06-16T09:00:00Z", status: "completed" },
+  { id: "fn5", appointmentId: "a1", nodeType: "scan", startTime: "2026-06-16T09:00:00Z", endTime: "2026-06-16T09:25:00Z", operator: "刘技师", status: "completed" },
+  { id: "fn6", appointmentId: "a1", nodeType: "discharge", startTime: "2026-06-16T09:30:00Z", endTime: "2026-06-16T09:32:00Z", operator: "李护士", status: "completed" },
+
+  { id: "fn7", appointmentId: "a2", nodeType: "check_in", startTime: "2026-06-16T08:25:00Z", endTime: "2026-06-16T08:28:00Z", operator: "李护士", status: "completed" },
+  { id: "fn8", appointmentId: "a2", nodeType: "blood_draw", startTime: "2026-06-16T08:30:00Z", endTime: "2026-06-16T08:35:00Z", operator: "王护士", status: "completed" },
+  { id: "fn9", appointmentId: "a2", nodeType: "injection", startTime: "2026-06-16T08:40:00Z", endTime: "2026-06-16T08:42:00Z", operator: "张技师", status: "completed" },
+  { id: "fn10", appointmentId: "a2", nodeType: "rest", startTime: "2026-06-16T08:42:00Z", endTime: "2026-06-16T09:30:00Z", status: "completed" },
+  { id: "fn11", appointmentId: "a2", nodeType: "scan", startTime: "2026-06-16T09:30:00Z", operator: "刘技师", status: "in_progress" },
+  { id: "fn12", appointmentId: "a2", nodeType: "discharge", status: "pending" },
+
+  { id: "fn13", appointmentId: "a3", nodeType: "check_in", startTime: "2026-06-16T08:50:00Z", endTime: "2026-06-16T08:53:00Z", operator: "李护士", status: "completed" },
+  { id: "fn14", appointmentId: "a3", nodeType: "blood_draw", startTime: "2026-06-16T08:55:00Z", endTime: "2026-06-16T09:00:00Z", operator: "王护士", status: "completed" },
+  { id: "fn15", appointmentId: "a3", nodeType: "injection", status: "pending" },
+  { id: "fn16", appointmentId: "a3", nodeType: "rest", status: "pending" },
+  { id: "fn17", appointmentId: "a3", nodeType: "scan", status: "pending" },
+  { id: "fn18", appointmentId: "a3", nodeType: "discharge", status: "pending" },
+
+  { id: "fn19", appointmentId: "a4", nodeType: "check_in", startTime: "2026-06-16T09:20:00Z", endTime: "2026-06-16T09:25:00Z", operator: "李护士", status: "completed" },
+  { id: "fn20", appointmentId: "a4", nodeType: "blood_draw", status: "in_progress", operator: "王护士", startTime: "2026-06-16T09:28:00Z" },
+  { id: "fn21", appointmentId: "a4", nodeType: "injection", status: "pending" },
+  { id: "fn22", appointmentId: "a4", nodeType: "rest", status: "pending" },
+  { id: "fn23", appointmentId: "a4", nodeType: "scan", status: "pending" },
+  { id: "fn24", appointmentId: "a4", nodeType: "discharge", status: "pending" },
+];
+
+export const checklists: Checklist[] = [
+  {
+    id: "cl1",
+    appointmentId: "a1",
+    fastingHours: 8,
+    bloodGlucose: 6.2,
+    isPregnant: false,
+    isLactating: false,
+    recentContrastExam: "3月前CT增强",
+    allergies: "青霉素过敏",
+    notes: "糖尿病患者，血糖控制良好",
+    passed: true,
+  },
+  {
+    id: "cl2",
+    appointmentId: "a2",
+    fastingHours: 10,
+    bloodGlucose: 5.5,
+    isPregnant: false,
+    isLactating: false,
+    recentContrastExam: "无",
+    allergies: "无",
+    notes: "住院患者，状态良好",
+    passed: true,
+  },
+  {
+    id: "cl3",
+    appointmentId: "a3",
+    fastingHours: 6,
+    bloodGlucose: 5.1,
+    isPregnant: false,
+    isLactating: false,
+    recentContrastExam: "无",
+    allergies: "无",
+    notes: "儿童患者，需家长陪同",
+    passed: true,
+  },
+];
+
+export const injectionRecords: InjectionRecord[] = [
+  {
+    id: "ir1",
+    appointmentId: "a1",
+    tracerType: "18F-FDG",
+    tracerBatch: "FDG-20260616-A",
+    tracerActivity: 370,
+    injectTime: "2026-06-16T08:10:00Z",
+    injector: "张技师",
+    injectionSite: "左肘正中静脉",
+    adverseReaction: "无",
+  },
+  {
+    id: "ir2",
+    appointmentId: "a2",
+    tracerType: "18F-FDG",
+    tracerBatch: "FDG-20260616-A",
+    tracerActivity: 370,
+    injectTime: "2026-06-16T08:40:00Z",
+    injector: "张技师",
+    injectionSite: "右肘正中静脉",
+    adverseReaction: "无",
+  },
+];
+
+export const devices: Device[] = [
+  {
+    id: "d1",
+    name: "PET-CT 1号机",
+    model: "GE Discovery MI",
+    status: "running",
+    currentAppointmentId: "a2",
+    utilizationToday: 68,
+    currentProgress: 55,
+  },
+  {
+    id: "d2",
+    name: "PET-CT 2号机",
+    model: "Siemens Biograph mCT",
+    status: "running",
+    utilizationToday: 52,
+    currentProgress: 0,
+  },
+  {
+    id: "d3",
+    name: "SPECT 1号机",
+    model: "GE Discovery NM/CT 670",
+    status: "maintenance",
+    utilizationToday: 0,
+  },
+];
+
+export const reports: Report[] = [
+  { id: "r1", appointmentId: "a1", radiologist: "陈医师", status: "published", reportTime: "2026-06-16T11:00:00Z", pickupTime: "2026-06-17T08:00:00Z", urgency: "normal" },
+  { id: "r2", appointmentId: "a2", radiologist: "陈医师", status: "pending", urgency: "normal" },
+  { id: "r3", appointmentId: "a3", radiologist: "王医师", status: "pending", urgency: "urgent" },
+  { id: "r4", appointmentId: "a4", radiologist: "王医师", status: "pending", urgency: "normal" },
+  { id: "r5", appointmentId: "a5", radiologist: "陈医师", status: "pending", urgency: "urgent" },
+  { id: "r6", appointmentId: "a6", radiologist: "李医师", status: "reporting", urgency: "normal" },
+  { id: "r7", appointmentId: "a7", radiologist: "李医师", status: "reviewed", urgency: "normal" },
+  { id: "r8", appointmentId: "a8", radiologist: "陈医师", status: "pending", urgency: "normal" },
+];
+
+export const restBeds: RestBed[] = [
+  { id: "rb1", name: "静卧1床", zone: "A区", occupied: true, appointmentId: "a2", occupiedSince: "2026-06-16T08:42:00Z" },
+  { id: "rb2", name: "静卧2床", zone: "A区", occupied: false },
+  { id: "rb3", name: "静卧3床", zone: "A区", occupied: true, appointmentId: "a3", occupiedSince: "2026-06-16T09:05:00Z" },
+  { id: "rb4", name: "静卧4床", zone: "A区", occupied: false },
+  { id: "rb5", name: "静卧5床", zone: "B区", occupied: false },
+  { id: "rb6", name: "静卧6床", zone: "B区", occupied: true, appointmentId: "a4", occupiedSince: "2026-06-16T09:30:00Z" },
+  { id: "rb7", name: "静卧7床", zone: "B区", occupied: false },
+  { id: "rb8", name: "静卧8床", zone: "B区", occupied: false },
+];
+
+export const statisticsData: StatisticsData = {
+  noShowRate: 5.6,
+  avgWaitingMinutes: 48,
+  deviceUtilization: 72,
+  dailyExams: 18,
+  weeklyExams: 86,
+  hourlyDistribution: [
+    { hour: 8, count: 3 },
+    { hour: 9, count: 4 },
+    { hour: 10, count: 3 },
+    { hour: 11, count: 2 },
+    { hour: 14, count: 2 },
+    { hour: 15, count: 3 },
+    { hour: 16, count: 1 },
+  ],
+  examTypeDistribution: [
+    { type: "PET-CT 全身", count: 12 },
+    { type: "PET-CT 专项", count: 3 },
+    { type: "骨扫描", count: 2 },
+    { type: "SPECT", count: 1 },
+  ],
+  monthlyTrend: [
+    { date: "1月", count: 245 },
+    { date: "2月", count: 218 },
+    { date: "3月", count: 276 },
+    { date: "4月", count: 298 },
+    { date: "5月", count: 312 },
+    { date: "6月", count: 168 },
+  ],
+};
